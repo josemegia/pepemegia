@@ -101,62 +101,6 @@ class ReservasController extends Controller
         return response()->json($reserva);
     }
     
-    public function estadisticas()
-    {
-        // Cachear estadísticas por un tiempo podría ser buena idea si son costosas
-        $stats = cache()->remember('reservas_estadisticas', now()->addMinutes(30), function () {
-            return [
-                'total_reservas' => Reserva::count(),
-                'por_tipo' => Reserva::selectRaw('tipo_reserva, count(*) as total')
-                                        ->groupBy('tipo_reserva')
-                                        ->orderBy('total', 'desc')
-                                        ->get(),
-                'por_mes' => Reserva::selectRaw('YEAR(fecha_inicio) as anio, MONTH(fecha_inicio) as mes_num, count(*) as total')
-                                        ->whereNotNull('fecha_inicio')
-                                        ->groupBy('anio', 'mes_num')
-                                        ->orderBy('anio', 'desc')
-                                        ->orderBy('mes_num', 'desc')
-                                        ->limit(24) // Últimos 24 meses, por ejemplo
-                                        ->get()
-                                        ->map(function($item){ // Para nombre del mes
-                                            $item->mes_nombre = Carbon::create()->month($item->mes_num)->monthName;
-                                            return $item;
-                                        }),
-                'gastos_por_mes' => Reserva::selectRaw('YEAR(fecha_inicio) as anio, MONTH(fecha_inicio) as mes_num, moneda, SUM(precio) as total_gastado')
-                                        ->whereNotNull('precio')
-                                        ->whereNotNull('moneda') // Importante para agrupar
-                                        ->groupBy('anio', 'mes_num', 'moneda')
-                                        ->orderBy('anio', 'desc')
-                                        ->orderBy('mes_num', 'desc')
-                                        ->limit(36) // Por moneda puede haber más entradas
-                                        ->get()
-                                        ->map(function($item){
-                                            $item->mes_nombre = Carbon::create()->month($item->mes_num)->monthName;
-                                            return $item;
-                                        }),
-                'proximas_reservas' => Reserva::with('pasajero')
-                                        ->where('fecha_inicio', '>=', now()->startOfDay())
-                                        ->orderBy('fecha_inicio', 'asc')
-                                        ->limit(10)
-                                        ->get(),
-                'ciudades_mas_visitadas' => Reserva::selectRaw('ciudad, pais, count(*) as visitas')
-                                        ->whereNotNull('ciudad')
-                                        ->groupBy('ciudad', 'pais')
-                                        ->orderBy('visitas', 'desc')
-                                        ->limit(10)
-                                        ->get(),
-                'proveedores_mas_usados' => Reserva::selectRaw('proveedor, count(*) as total')
-                                        ->whereNotNull('proveedor')
-                                        ->groupBy('proveedor')
-                                        ->orderBy('total', 'desc')
-                                        ->limit(10)
-                                        ->get()
-            ];
-        });
-        
-        return response()->json($stats);
-    }
-    
     public function timeline() // Para FullCalendar o similar
     {
         $reservas = Reserva::whereNotNull('fecha_inicio')

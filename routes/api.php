@@ -20,10 +20,8 @@ Route::get('/user', function (Request $request) {
 // Rutas para reservas
 Route::prefix('reservas')->group(function () {
 
-    Route::get('/estadisticas', [ReservasController::class, 'estadisticas']);
     Route::get('/timeline', [ReservasController::class, 'timeline']);
     Route::get('/exportar', [ReservasController::class, 'exportar']);
-    Route::get('/{id}', [ReservasController::class, 'show']);
 
     Route::prefix('aeropuertos')->group(function () {
         Route::get('/', [ReservasController::class, 'index']);
@@ -35,6 +33,7 @@ Route::prefix('reservas')->group(function () {
         Route::get('/', [EstanciasController::class, 'index']);    
         Route::get('/pasajeros', [EstanciasController::class, 'pasajeros']);
         Route::get('/cronograma', [EstanciasController::class, 'cronograma']);
+        Route::get('/{id}', [ReservasController::class, 'show']);  
     });
 
 });
