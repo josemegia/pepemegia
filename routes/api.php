@@ -19,22 +19,22 @@ Route::get('/user', function (Request $request) {
 
 // Rutas para reservas
 Route::prefix('reservas')->group(function () {
+
+    Route::get('/estadisticas', [ReservasController::class, 'estadisticas']);
+    Route::get('/timeline', [ReservasController::class, 'timeline']);
+    Route::get('/exportar', [ReservasController::class, 'exportar']);
+    Route::get('/{id}', [ReservasController::class, 'show']);
+
+    Route::prefix('aeropuertos')->group(function () {
+        Route::get('/', [ReservasController::class, 'index']);
+        Route::get('/get-country', [ReservasController::class, 'testGetCountry']);
+        Route::post('/update-references', [ReservasController::class, 'updateAirportReferenceData']);
+    });
+
     Route::prefix('estancias')->group(function () {
         Route::get('/', [EstanciasController::class, 'index']);    
         Route::get('/pasajeros', [EstanciasController::class, 'pasajeros']);
         Route::get('/cronograma', [EstanciasController::class, 'cronograma']);
     });
-    Route::get('/', [ReservasController::class, 'index']);
-    Route::get('/estadisticas', [ReservasController::class, 'estadisticas']);
-    Route::get('/timeline', [ReservasController::class, 'timeline']);
-    Route::get('/exportar', [ReservasController::class, 'exportar']);
-    // Route::post('/airports/update-references', [ReservasController::class, 'updateAirportReferenceData'])->middleware(['auth:sanctum', 'admin']);
-    // Si es para pruebas internas o un sistema cerrado, puedes omitir el middleware de admin temporalmente,
-    // pero asegúrate de protegerlo adecuadamente para producción.
-    Route::post('/update-references', [ReservasController::class, 'updateAirportReferenceData']);
 
-    // Ruta de prueba para obtener un país
-    Route::get('/get-country', [ReservasController::class, 'testGetCountry']);
-    
-    Route::get('/{id}', [ReservasController::class, 'show']);
 });
