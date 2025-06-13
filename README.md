@@ -22,6 +22,7 @@
   <li>🧳 Registro automático de reservas y pasajeros</li>
   <li>📅 Cálculo de días por país (timeline)</li>
   <li>🌐 API REST + panel visual con filtros</li>
+  <li>🧭 Menú de navegación para acceder rápidamente a cada sección</li>
 </ul>
 
 ---
