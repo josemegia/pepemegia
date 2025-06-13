@@ -107,6 +107,7 @@
   </style>
 </head>
 <body>
+  @include('partials.menu')
   <div class="container">
     <h1>🌍 Estancias por País</h1>
     <div class="filters">

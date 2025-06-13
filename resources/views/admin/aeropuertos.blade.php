@@ -31,8 +31,18 @@
     </style>
 </head>
 <body>
+    @include('partials.menu')
     <div class="container">
         <h1>Administración de Referencias de Aeropuertos</h1>
+        <h2>Consultar País por Identificador</h2>
+        <label for="identifierInput">Identificador (Ej: BOG, MAD, bogota, barcelona):</label>
+        <input type="text" id="identifierInput" placeholder="BOG o bogota">
+        <button id="getCountryButton" class="secondary">Consultar País</button>
+        <div id="queryStatus" class="status" style="display:none;"></div>
+        <pre id="queryResult" style="display:none;"></pre>
+
+        <hr>
+
         <p>Esta página interactúa con los endpoints de tu API en <code>{{ url('/api/reservas/aeropuertos') }}</code>.</p>
 
         <hr>
@@ -42,14 +52,6 @@
         <button id="updateDbButton">Actualizar Referencias</button>
         <div id="updateStatus" class="status" style="display:none;"></div>
 
-        <hr>
-
-        <h2>Consultar País por Identificador</h2>
-        <label for="identifierInput">Identificador (Ej: BOG, MAD, bogota, barcelona):</label>
-        <input type="text" id="identifierInput" placeholder="BOG o bogota">
-        <button id="getCountryButton" class="secondary">Consultar País</button>
-        <div id="queryStatus" class="status" style="display:none;"></div>
-        <pre id="queryResult" style="display:none;"></pre>
     </div>
 
     <script>
@@ -79,7 +81,7 @@
             updateDbButton.textContent = 'Actualizando...';
 
             try {
-                const response = await fetch(`${baseApiUrl}/aeropuertos/update-references`, { // Usa la URL base
+                const response = await fetch(`${baseApiUrl}/update-references`, { // Usa la URL base
                     method: 'POST',
                     headers: {
                         'Accept': 'application/json',
@@ -119,7 +121,7 @@
 
             try {
                 // Para peticiones GET no se necesita CSRF token
-                const response = await fetch(`${baseApiUrl}/aeropuertos/get-country?identifier=${encodeURIComponent(identifier)}`, {
+                const response = await fetch(`${baseApiUrl}/get-country?identifier=${encodeURIComponent(identifier)}`, {
                     method: 'GET',
                     headers: {
                         'Accept': 'application/json',
