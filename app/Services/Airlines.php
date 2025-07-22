@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Parsers\Airlines\AirlineParserInterface;
 use App\Parsers\Airlines\IberiaParser;
+use App\Parsers\Airlines\CopaParser;
 use Illuminate\Support\Str;
 
 class Airlines
@@ -18,10 +19,9 @@ class Airlines
     protected static function getParserFor(string $pdfText): ?AirlineParserInterface
     {
         $text = strtolower($pdfText);
-
         return match (true) {
             Str::contains($text, 'iberia') => new IberiaParser(),
-            // Agrega más aerolíneas aquí
+            Str::contains($text, 'copa') => new CopaParser(),
             default => null,
         };
     }
@@ -29,6 +29,11 @@ class Airlines
     public static function iberia(string $pdfText): ?array
     {
         return (new \App\Parsers\Airlines\IberiaParser())->parse($pdfText);
+    }
+    
+    public static function copa_airlines(string $pdfText): ?array
+    {
+        return (new \App\Parsers\Airlines\CopaParser())->parse($pdfText);
     }
 
 }

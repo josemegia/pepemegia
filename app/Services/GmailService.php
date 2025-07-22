@@ -5,6 +5,7 @@ namespace App\Services;
 use Google\Client;
 use Google\Service\Gmail;
 use App\Helpers\AirlineHelper;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -16,13 +17,18 @@ class GmailService
     private $client;
     private $service;
     private $email;
+    private $user;
     private $tokenPath;
     private $queriesConfig; // Para cargar queries desde config
 
-    public function __construct(string $email)
+    public function __construct(User $user)
     {
-        $this->email = $email;
-        $this->tokenPath = storage_path('app/private/token-' . $email . '.json');
+        $this->user = $user;
+        $this->email = $user->email; // Se asigna el email desde el usuario
+
+        if (empty($this->user->social_provider_refresh_token)) {
+            throw new \InvalidArgumentException("El usuario {$this->user->email} no tiene un refresh_token. Debe re-autorizar la aplicación.");
+        }
 
         $this->airlineDomains = AirlineHelper::allAirlineDomains();
         $this->airlineKeywords = AirlineHelper::allAirlineKeywords();
@@ -30,40 +36,44 @@ class GmailService
 
         $this->client = new Client();
         $this->client->setApplicationName('Extractor de Reservas');
-        $this->client->setScopes([Gmail::GMAIL_READONLY]);
-        $this->client->setAuthConfig(Storage::disk('local')->path('credentials.json'));
+        
+        // Usa las credenciales de la aplicación (OAuth) desde config/services.php
+        $this->client->setClientId(config('services.google.client_id'));
+        $this->client->setClientSecret(config('services.google.client_secret'));
+        $this->client->setRedirectUri(config('services.google.redirect'));
+        
+        $this->client->setScopes(config('services.google.scopes'));
+        
         $this->client->setAccessType('offline');
+
+        // Carga los tokens desde el objeto User, no desde un archivo
+        $this->client->setAccessToken([
+            'access_token' => $this->user->social_provider_token,
+            'refresh_token' => $this->user->social_provider_refresh_token,
+        ]);
+
         $this->service = new Gmail($this->client);
     }
 
     public function authenticate()
     {
-        // ... (método authenticate se mantiene igual que en la versión anterior robusta) ...
-        Log::info("Intentando autenticar para {$this->email}. Buscando token en: {$this->tokenPath}");
-        if (!file_exists($this->tokenPath)) {
-            Log::error("No se encontró token para {$this->email} en la ruta: {$this->tokenPath}");
-            throw new \Exception("No se encontró token para {$this->email} en {$this->tokenPath}. Por favor, re-autentica.");
-        }
-
-        $accessTokenJson = file_get_contents($this->tokenPath);
-        $accessToken = json_decode($accessTokenJson, true);
-
-        if ($accessToken === null && json_last_error() !== JSON_ERROR_NONE) {
-            Log::error("Error decodificando el token JSON para {$this->email} desde {$this->tokenPath}. Error JSON: " . json_last_error_msg());
-            throw new \Exception("Error al decodificar el token JSON para {$this->email}.");
-        }
-        
-        $this->client->setAccessToken($accessToken);
-
         if ($this->client->isAccessTokenExpired()) {
-            Log::info("Token de acceso para {$this->email} ha expirado. Intentando refrescar.");
+            Log::info("Token de acceso para {$this->user->email} ha expirado. Intentando refrescar.");
+            
             if ($this->client->getRefreshToken()) {
                 $this->client->fetchAccessTokenWithRefreshToken($this->client->getRefreshToken());
-                file_put_contents($this->tokenPath, json_encode($this->client->getAccessToken()));
-                Log::info("Token refrescado y guardado para {$this->email} en {$this->tokenPath}.");
+                $newAccessToken = $this->client->getAccessToken();
+
+                $this->client->setAccessToken($newAccessToken);
+
+                $this->user->update([
+                    'social_provider_token' => $newAccessToken['access_token']
+                ]);
+
+                Log::info("Token refrescado y guardado en la base de datos para {$this->user->email}.");
             } else {
-                Log::error("El token para {$this->email} ha expirado y NO hay refresh_token. El usuario debe re-autenticar.");
-                throw new \Exception("El token ha expirado y no hay refresh_token para {$this->email}. Por favor, re-autentica.");
+                Log::error("El token para {$this->user->email} ha expirado y NO hay refresh_token. El usuario debe re-autenticar.");
+                throw new \Exception("El token ha expirado y no hay refresh_token para {$this->user->email}. Por favor, re-autentica.");
             }
         }
     }
@@ -172,15 +182,34 @@ class GmailService
         return $emailsOutput;
     }
 
-    public function getReservationEmailsDesde(Carbon $desde, string $tipo = 'airline')
+    public function getReservationEmailsDesde(
+        Carbon $desde,
+        ?Carbon $hasta = null,
+        string $tipo = 'airline')
+
     {
         $this->authenticate();
+
         $fechaInicio = $desde->format('Y/m/d');
+        $fechaFin = $hasta ? $hasta->addDay()->format('Y/m/d') : null; // Gmail excluye el día exacto en 'before:'
+
         $queries = [];
 
+        $subjectKeywords = implode(' OR ', $this->airlineKeywords);
+        $genericKeywords = implode(' OR ', $this->defaultKeywords);
+        $fromDomains = implode(' OR ', array_map(fn($domain) => "from:{$domain}", $this->airlineDomains));
+
         if ($tipo === 'airline' || $tipo === null) {
-            $queries = array_merge($queries, $this->getAirlineSpecificQueries($fechaInicio));
+            if (!empty($fromDomains)) {
+                $queries[] = "({$fromDomains}) subject:({$subjectKeywords}) after:{$fechaInicio}" . ($fechaFin ? " before:{$fechaFin}" : '');
+            }
+
+            //$queries[] = 'subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass") after:' . $fechaInicio . ($fechaFin ? " before:{$fechaFin}" : '');
+// AHORA (en getReservationEmailsDesde):
+            $queries[] = 'subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass" OR "Pase de Abordar") after:' . $fechaInicio . ($fechaFin ? " before:{$fechaFin}" : '');
+            $queries[] = "(\"vuelo\" OR \"aerolínea\" OR \"flight\" OR \"airline\" OR \"PNR\") subject:({$genericKeywords}) after:{$fechaInicio}" . ($fechaFin ? " before:{$fechaFin}" : '');
         }
+
 
         // Lógica de búsqueda igual que en getReservationEmails()
         $emailsOutput = [];
@@ -232,101 +261,157 @@ class GmailService
         return $emailsOutput;
     }
 
-    // extractEmailContent y getMessageBody se mantienen igual que en la última versión robusta que te di
-
+    /**
+     * Extrae asunto, fecha, remitente, cuerpo y PDF-texto (con soporte recursivo).
+     * @param Gmail\Message $message
+     * @return array
+     */
     public function extractEmailContent(Gmail\Message $message): array
     {
         $messageId = $message->getId();
+        Log::info("▶️ Iniciando extracción de contenido para el mensaje ID: {$messageId}");
+
         $payload = $message->getPayload();
         $headers = $payload->getHeaders();
+
         $emailData = [
-            'subject' => null,
-            'date' => null,
-            'from' => null,
-            'body' => '', // Cuerpo principal del email (texto plano o HTML convertido)
-            'snippet' => $message->getSnippet(),
-            'adjuntos_pdf_texto' => [], // Aquí guardaremos el texto de los PDFs
+            'subject'            => null,
+            'date'               => null,
+            'from'               => null,
+            'body'               => '',
+            'snippet'            => $message->getSnippet(),
+            'adjuntos_pdf_texto' => [],
         ];
 
+        /*-----------------------------------------------
+        | Cabeceras principales
+        |-----------------------------------------------*/
         foreach ($headers as $header) {
-            if ($header->getName() === 'Subject') {
-                $emailData['subject'] = $header->getValue();
-            }
-            if ($header->getName() === 'Date') {
-                $emailData['date'] = $header->getValue();
-            }
-            if ($header->getName() === 'From') {
-                $emailData['from'] = $header->getValue();
+            switch ($header->getName()) {
+                case 'Subject': $emailData['subject'] = $header->getValue(); break;
+                case 'Date':    $emailData['date']    = $header->getValue(); break;
+                case 'From':    $emailData['from']    = $header->getValue(); break;
             }
         }
+        Log::debug("Cabeceras extraídas para {$messageId}", ['subject' => $emailData['subject'], 'from' => $emailData['from']]);
 
-        $parts = $payload->getParts() ? $payload->getParts() : [$payload]; // Si no hay parts, el payload mismo es el cuerpo
-        $foundBody = false;
+        /*-----------------------------------------------
+        | Procesar partes (recursivo)
+        |-----------------------------------------------*/
+        $partesRaiz = $payload->getParts() ?: [$payload];
+        $this->processPartsRecursive($partesRaiz, $emailData, $messageId);
 
-        foreach ($parts as $part) {
-            // Intenta obtener el cuerpo principal del email (prioriza text/plain)
-            if (!$foundBody && $part->getMimeType() === 'text/plain' && $part->getBody() && $part->getBody()->getData()) {
-                $emailData['body'] = base64_decode(strtr($part->getBody()->getData(), '-_', '+/'));
-                $foundBody = true;
-            }
-            // Si no hay text/plain, busca text/html y conviértelo (strip_tags es simple, considera una librería si necesitas mejor conversión)
-            if (!$foundBody && $part->getMimeType() === 'text/html' && $part->getBody() && $part->getBody()->getData()) {
-                $htmlBody = base64_decode(strtr($part->getBody()->getData(), '-_', '+/'));
-                $emailData['body'] = strip_tags($htmlBody); // Conversión simple
-                $foundBody = true;
-            }
-
-            // --- NUEVA LÓGICA PARA PROCESAR ADJUNTOS PDF ---
-            if (!empty($part->getFilename()) && $part->getBody() && $part->getBody()->getAttachmentId()) {
-                $filename = $part->getFilename();
-                $mimeType = $part->getMimeType();
-
-                // Verifica si es un PDF por nombre de archivo o tipo MIME
-                if (Str::endsWith(strtolower($filename), '.pdf') || $mimeType === 'application/pdf') {
-                    Log::info("GmailService: PDF adjunto encontrado '{$filename}' en mensaje ID {$messageId}. Intentando parsear.");
-                    try {
-                        $attachment = $this->service->users_messages_attachments->get('me', $messageId, $part->getBody()->getAttachmentId());
-                        $pdfRawData = base64_decode(strtr($attachment->getData(), '-_', '+/'));
-                        
-                        $parser = new PdfParser(); // Instancia el parser de PDF
-                        $pdf = $parser->parseContent($pdfRawData);
-                        $pdfTextContent = $pdf->getText(); // Extrae todo el texto del PDF
-                        
-                        if (!empty($pdfTextContent)) {
-                            $emailData['adjuntos_pdf_texto'][] = [
-                                'filename' => $filename,
-                                'content' => $pdfTextContent,
-                            ];
-                            Log::info("GmailService: Texto extraído exitosamente del PDF '{$filename}'. Longitud: " . strlen($pdfTextContent) . " caracteres.");
-                        } else {
-                            Log::warning("GmailService: El PDF '{$filename}' no contenía texto o no se pudo extraer.");
-                        }
-                    } catch (\Exception $e) {
-                        Log::error("GmailService: Error procesando PDF adjunto '{$filename}' para mensaje ID {$messageId}: " . $e->getMessage());
-                    }
-                }
-            }
-            // Si el email es multipart/alternative, las partes podrían estar anidadas.
-            // Podrías necesitar una función recursiva para buscar en $part->getParts() también.
-            // Por simplicidad, este ejemplo asume una estructura de partes no muy profunda o que los PDFs están en el nivel principal de 'parts'.
-        }
-        
-        // Si después de revisar las partes principales no se encontró cuerpo y hay una única parte (payload es el cuerpo)
-        if (!$foundBody && $payload->getMimeType() === 'text/plain' && $payload->getBody() && $payload->getBody()->getData()) {
-             $emailData['body'] = base64_decode(strtr($payload->getBody()->getData(), '-_', '+/'));
-        } elseif (!$foundBody && $payload->getMimeType() === 'text/html' && $payload->getBody() && $payload->getBody()->getData()) {
-            $htmlBody = base64_decode(strtr($payload->getBody()->getData(), '-_', '+/'));
-            $emailData['body'] = strip_tags($htmlBody);
-        }
-
-
-        // Limpiar el cuerpo del email antes de devolverlo
+        /* Limpieza final del cuerpo */
         if (!empty($emailData['body'])) {
-            $emailData['body'] = preg_replace('/\s+/', ' ', $emailData['body']); // Reemplaza múltiples espacios/saltos
-            $emailData['body'] = trim($emailData['body']);
+            $emailData['body'] = trim(preg_replace('/\s+/', ' ', $emailData['body']));
         }
+
+        Log::info("✅ Finalizada extracción para {$messageId}", [
+            'subject'          => $emailData['subject'],
+            'body_found'       => !empty($emailData['body']),
+            'pdfs_extracted'   => count($emailData['adjuntos_pdf_texto']),
+        ]);
 
         return $emailData;
+    }
+
+    /**
+     * Recorre todas las partes (y sub-partes) para:
+     * 1. Hallar el cuerpo principal
+     * 2. Detectar y extraer PDFs (adjuntos o inline)
+     * 3. Seguir bajando recursivamente
+     * @param Gmail\MessagePart[] $parts
+     * @param array $emailData
+     * @param string $messageId
+     */
+    private function processPartsRecursive(array $parts, array &$emailData, string $messageId): void
+    {
+        foreach ($parts as $part) {
+            $mimeType = $part->getMimeType() ?? 'desconocido';
+            $filename = $part->getFilename() ?? '';
+            $body     = $part->getBody();
+            $attachmentId = $body?->getAttachmentId();
+
+            Log::debug("🔎 Analizando parte MIME en mensaje {$messageId}", [
+                'mimeType'       => $mimeType,
+                'filename'       => $filename ?: '(ninguno)',
+                'hasAttachmentId'=> $attachmentId ? 'sí' : 'no',
+                'hasInlineData'  => $body?->getData() ? 'sí' : 'no',
+            ]);
+
+            /*-------------------------------------------
+            | 1) Cuerpo principal (prioriza text/plain)
+            |-------------------------------------------*/
+            if (empty($emailData['body']) && $body && $body->getData()) {
+                if ($mimeType === 'text/plain') {
+                    $emailData['body'] = base64_decode(strtr($body->getData(), '-_', '+/'));
+                    Log::debug("Cuerpo 'text/plain' encontrado y asignado para {$messageId}.");
+                } elseif ($mimeType === 'text/html') {
+                    $html = base64_decode(strtr($body->getData(), '-_', '+/'));
+                    $emailData['body'] = strip_tags($html); // Asigna como fallback
+                    Log::debug("Cuerpo 'text/html' encontrado y asignado como fallback para {$messageId}.");
+                }
+            }
+
+            /*-------------------------------------------
+            | 2) Detección y extracción de PDF
+            |-------------------------------------------*/
+            $esPdf = (
+                ($filename && Str::endsWith(strtolower($filename), '.pdf'))
+                || $mimeType === 'application/pdf'
+                || ($filename && $mimeType === 'application/octet-stream') // Caso común para adjuntos genéricos
+            );
+
+            if ($esPdf && $body) {
+                Log::info("📄 Potencial PDF detectado en mensaje {$messageId}. Filename: '{$filename}', MimeType: '{$mimeType}'");
+                $pdfRawData = null;
+
+                try {
+                    if ($attachmentId) {
+                        Log::debug("Intentando obtener PDF desde attachmentId: {$attachmentId}");
+                        $attachment = $this->service->users_messages_attachments->get('me', $messageId, $attachmentId);
+                        $pdfRawData = base64_decode(strtr($attachment->getData(), '-_', '+/'));
+                        Log::info("Datos de PDF adjunto recuperados para '{$filename}'");
+
+                    } elseif ($body->getData()) {
+                        Log::debug("Intentando obtener PDF inline (base64) directamente desde la parte.");
+                        $pdfRawData = base64_decode(strtr($body->getData(), '-_', '+/'));
+                        Log::info("Datos de PDF inline recuperados para '{$filename}'");
+                    }
+
+                    if ($pdfRawData) {
+                        // Log de validación: los PDF empiezan con "%PDF" (hex: 25 50 44 46)
+                        Log::debug("Inicio binario del PDF (hex): " . bin2hex(substr($pdfRawData, 0, 8)));
+
+                        $parser   = new PdfParser();
+                        $document = $parser->parseContent($pdfRawData);
+                        $pdfText  = $document->getText();
+
+                        if (!empty($pdfText)) {
+                            $emailData['adjuntos_pdf_texto'][] = [
+                                'filename' => $filename ?: 'adjunto.pdf',
+                                'content'  => $pdfText,
+                            ];
+                            Log::info("✔️ Texto extraído con éxito del PDF '{$filename}' (" . strlen($pdfText) . ' caracteres).');
+                        } else {
+                            Log::warning("⚠️ El PDF '{$filename}' en mensaje {$messageId} fue procesado pero no contenía texto legible o estaba vacío.");
+                        }
+                    } else {
+                         Log::warning("⚠️ Se detectó un PDF ('{$filename}') pero no se pudo recuperar su contenido binario en mensaje {$messageId}.");
+                    }
+                } catch (\Exception $e) {
+                    Log::error("❌ Error fatal procesando PDF '{$filename}' en {$messageId}: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+                }
+            }
+
+            /*-------------------------------------------
+            | 3) Recursividad en sub-partes
+            |-------------------------------------------*/
+            if ($part->getParts()) {
+                Log::debug("Descendiendo a sub-partes en mensaje {$messageId}.");
+                $this->processPartsRecursive($part->getParts(), $emailData, $messageId);
+            }
+        }
     }
 
     private function getMessageBody(\Google\Service\Gmail\MessagePart $payload): string

@@ -1,0 +1,39 @@
+
+
+/* Estilos generales (MOVIDOS AQUÍ DESDE EL ANTIGUO menu.css) */
+body { font-family: 'Poppins', sans-serif; }
+
+/* HEADER: Contenedor principal de la barra de navegación */
+.header-content {
+    @apply flex justify-between items-center px-4 py-3 md:px-6 md:py-4 bg-white dark:bg-gray-800 shadow-md z-20 relative;
+}
+.dark .header-content {
+    @apply bg-gray-800 shadow-lg;
+}
+
+/* LOGO */
+.logo-link {
+    @apply text-xl md:text-2xl font-extrabold text-gray-900 dark:text-white no-underline;
+}
+
+/* BOTÓN DE HAMBURGUESA (visible solo en móvil) */
+.hamburger-button {
+    @apply md:hidden block bg-transparent border-none text-gray-700 dark:text-gray-300 text-2xl cursor-pointer p-2;
+}
+.hamburger-button:focus {
+    @apply outline-none ring-2 ring-blue-500;
+}
+
+/* CONTENEDOR DEL MENÚ (Gestiona la visibilidad y posición responsiva) */
+.main-menu-container {
+    /* Estilos para móvil: oculto por defecto, se muestra con Alpine.js, posicionado absolutamente */
+    @apply absolute top-full left-0 w-full bg-white dark:bg-gray-800 shadow-lg py-2 z-10;
+
+    /* Estilos para escritorio (md y superior): visible, relativo, sin sombra, sin posicionamiento absoluto */
+    @apply md:block md:relative md:top-auto md:left-auto md:w-auto md:bg-transparent md:dark:bg-transparent md:shadow-none md:py-0;
+    @apply md:flex md:flex-grow md:justify-end; /* Para que el menú ocupe el espacio restante y se alinee a la derecha */
+}
+/* Clase para mostrar el menú móvil (controlada por Alpine.js) */
+.main-menu-container.show-mobile {
+    @apply block;
+}

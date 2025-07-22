@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Services\GmailService;
+use App\Models\User;
 use App\Services\ReservationExtractor;
 use App\Services\ReservationRegistrar;
 use App\Services\AirlineDetectorService;
@@ -20,227 +21,283 @@ class ExtraeVuelos extends Command
     protected $signature = 'vuelos:extraer 
                             {--no-gemini : No utilizar Gemini como fallback}
                             {--email= : Cuenta específica de Gmail a procesar} 
-                            {--meses=36 : Meses hacia atrás para buscar correos} 
+                            {--meses=12 : Meses hacia atrás para buscar correos} 
                             {--dry-run : Muestra los datos sin guardarlos}
                             {--from= : Filtra por dirección o dominio del remitente}
-                            {--subject= : Filtra por texto contenido en el asunto}';
+                            {--subject= : Filtra por texto contenido en el asunto}
+                            {--fecha-inicio= : Filtra correos desde una fecha específica (YYYY-MM-DD)}
+                            {--fecha-fin= : Filtra correos hasta una fecha específica (YYYY-MM-DD)}';
 
-    protected $description = 'Extrae reservas de vuelos desde Gmail y completa las tablas pasajeros y reservas';
+    protected $description = 'Extrae reservas de vuelos desde las cuentas de Gmail de los usuarios administradores';
 
     protected $geminiApiKey;
     protected $geminiModelName;
+    protected $geminiApiUrl;
 
     public function __construct()
     {
         parent::__construct();
         $this->geminiApiKey = config('services.gemini.key');
         $this->geminiModelName = config('services.gemini.model');
+        $this->geminiApiUrl = config('services.gemini.url');
     }
 
     public function handle(): int
     {
-        //$meses = (int) $this->option('meses');
-        $archivoFecha = Storage::disk('local')->path('ultima_ejecucion_vuelos.txt');
-        $desdeFecha = now()->subMonths((int) $this->option('meses', 36)); // fallback
+        $this->info("\033[32m🚀 Iniciando el comando 'vuelos:extraer'. Preparando configuración inicial...\033[0m");
 
-        if (file_exists($archivoFecha)) {
-            $contenido = trim(file_get_contents($archivoFecha));
+        $desdeFecha = null;
+        $hastaFecha = null;
+
+        // --- BLOQUE DE CÓDIGO DEFINITIVO ---
+        // Prioridad 1: Usar fechas específicas si se proporciona --fecha-inicio O --fecha-fin
+        if ($this->option('fecha-inicio') || $this->option('fecha-fin')) {
             try {
-                $fechaRegistrada = \Carbon\Carbon::parse($contenido);
-                if ($fechaRegistrada->isValid()) {
-                    $desdeFecha = $fechaRegistrada->copy()->subDay(); // seguridad: restar 1 día
-                    $this->info("📅 Última ejecución registrada: {$fechaRegistrada->toDateString()}");
+                // Define la fecha de inicio
+                if ($this->option('fecha-inicio')) {
+                    $desdeFecha = \Carbon\Carbon::parse($this->option('fecha-inicio'))->startOfDay();
+                } else {
+                    // Si no hay inicio, usa el fallback de 36 meses como punto de partida
+                    $desdeFecha = now()->subMonths(36)->startOfDay();
+                    $this->info("\033[33m⚠️ No se proveyó --fecha-inicio. Usando fallback de 36 meses como inicio.\033[0m");
                 }
+
+                // Define la fecha de fin
+                if ($this->option('fecha-fin')) {
+                    $hastaFecha = \Carbon\Carbon::parse($this->option('fecha-fin'))->endOfDay();
+                } else {
+                    // Si no hay fin, se asume que es hasta hoy
+                    $hastaFecha = now()->endOfDay();
+                }
+
+                $this->info("\033[32m📅 Usando rango de fechas: Desde {$desdeFecha->toDateString()} hasta {$hastaFecha->toDateString()}\033[0m");
+
             } catch (\Exception $e) {
-                $this->warn("⚠️ Fecha de última ejecución inválida, se usará fallback.");
+                $this->error('Alguna de las fechas proporcionadas no es válida. Usa el formato YYYY-MM-DD.');
+                return 1;
+            }
+        } else {
+            $archivoFecha = Storage::disk('local')->path('ultima_ejecucion_vuelos.txt');
+            $this->info("\033[36m📂 Verificando archivo de última ejecución: {$archivoFecha}\033[0m"); // Cyan for checks
+
+            if ($this->option('meses')) {
+                $desdeFecha = now()->subMonths((int) $this->option('meses'));
+                $this->info("\033[32m📅 Opción --meses activada. Forzando extracción desde hace {$this->option('meses')} meses: {$desdeFecha->toDateString()}\033[0m"); // Green for options applied
+            } elseif (file_exists($archivoFecha)) {
+                $this->info("\033[36m📄 Archivo de última ejecución encontrado. Leyendo contenido...\033[0m"); // Cyan for file operations
+                $contenido = trim(file_get_contents($archivoFecha));
+                try {
+                    $fechaRegistrada = \Carbon\Carbon::parse($contenido);
+                    if ($fechaRegistrada->isValid()) {
+                        $desdeFecha = $fechaRegistrada->copy()->subDay(); // seguridad
+                        $this->info("\033[32m📅 Última ejecución registrada válida: {$fechaRegistrada->toDateString()}. Usando fecha ajustada: {$desdeFecha->toDateString()}\033[0m"); // Green for valid data
+                    } else {
+                        throw new \Exception('Invalid date');
+                    }
+                } catch (\Exception $e) {
+                    $desdeFecha = now()->subMonths(36);
+                    $this->warn("\033[33m⚠️ Fecha inválida en archivo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m"); // Yellow for fallback/warning
+                }
+            } else {
+                $desdeFecha = now()->subMonths(36);
+                $this->info("\033[33m📅 No hay archivo previo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m"); // Yellow for fallback
             }
         }
-        $emails = $this->option('email') 
-            ? [trim($this->option('email'))] 
-            : config('reservas.accounts', []);
 
-        $filterFrom = strtolower($this->option('from') ?? '');
-        $filterSubject = strtolower($this->option('subject') ?? '');
+        $usersToProcess = [];
+        if ($email = $this->option('email')) {
+            $this->info("\033[32m📧 Opción --email activada. Procesando cuenta específica: {$email}\033[0m"); // Green for options
+            $user = User::where('email', trim($email))->first();
+            if ($user) {
+                $usersToProcess[] = $user;
+                $this->info("\033[32m✅ Usuario encontrado para {$email}\033[0m"); // Green for success
+            } else {
+                $this->error("\033[31m❌ Usuario no encontrado para {$email}\033[0m"); // Red for error
+            }
+        } else {
+            $this->info("\033[36m🔍 Buscando todos los usuarios administradores con tokens de Google...\033[0m"); // Cyan for search
+            $usersToProcess = User::where('role', 'admin')
+                                  ->whereNotNull('social_provider_refresh_token')
+                                  ->get();
+            $this->info("\033[35m📊 Encontrados " . count($usersToProcess) . " usuarios administradores válidos\033[0m"); // Magenta for counts/data
+        }
 
-        if (empty($emails)) {
-            $this->error('❌ No hay cuentas configuradas para extracción.');
+        if (empty($usersToProcess) || (is_countable($usersToProcess) && count($usersToProcess) === 0)) {
+            $this->error("\033[31m❌ No se encontraron usuarios válidos para procesar. Finalizando comando.\033[0m"); // Red for failure
             return Command::FAILURE;
         }
 
-        foreach ($emails as $email) {
-            $this->info("📬 Procesando cuenta: {$email}");
-            $gmail = new GmailService($email);
-            //$mensajes = $gmail->getReservationEmails($meses, 'airline');
-            $mensajes = $gmail->getReservationEmailsDesde($desdeFecha, 'airline');
+        $filterFrom = strtolower($this->option('from') ?? '');
+        $filterSubject = strtolower($this->option('subject') ?? '');
+        if ($filterFrom) {
+            $this->info("\033[32m🔍 Filtro --from activado: {$filterFrom}\033[0m"); // Green for filters
+        }
+        if ($filterSubject) {
+            $this->info("\033[32m🔍 Filtro --subject activado: {$filterSubject}\033[0m"); // Green for filters
+        }
 
+        foreach ($usersToProcess as $user) {
+            $this->info("\033[36m📬 Iniciando procesamiento para la cuenta del admin: {$user->email}\033[0m"); // Cyan for processing start
+            
+            try {
+                $this->info("\033[36m🔌 Creando instancia de GmailService para el usuario...\033[0m");
+                $gmail = new GmailService($user); 
+                $this->info("\033[36m📥 Obteniendo correos de reservas desde {$desdeFecha->toDateString()}...\033[0m");
+                $mensajes = $gmail->getReservationEmailsDesde($desdeFecha, $hastaFecha, 'airline');
 
-            $this->info("📩 Correos encontrados: " . count($mensajes));
+                $this->info("\033[35m📩 Total de correos encontrados: " . count($mensajes) . "\033[0m");
 
-            foreach ($mensajes as $mensaje) {
-                $this->info("──────────────✉️ Procesando mensaje {$mensaje['id']} ──────────────");
+                foreach ($mensajes as $mensaje) {
+                    $this->info("\033[36m──────────────✉️ Iniciando procesamiento del mensaje ID: {$mensaje['id']} ──────────────\033[0m");
 
-                $remitente = $this->extraerEmailReal($mensaje['content']['from'] ?? '');
-                $asunto = $mensaje['content']['subject'] ?? '';
-                $body = $mensaje['content']['body'] ?? '';
-                $pdfs = $mensaje['content']['adjuntos_pdf_texto'] ?? [];
+                    $remitente = $this->extraerEmailReal($mensaje['content']['from'] ?? '');
+                    $asunto = $mensaje['content']['subject'] ?? '';
+                    $body = $mensaje['content']['body'] ?? '';
+                    $pdfs = $mensaje['content']['adjuntos_pdf_texto'] ?? [];
 
-                Log::debug("📧 Remitente: {$remitente}");
-                Log::debug("📝 Asunto: {$asunto}");
-                Log::debug("📎 PDFs adjuntos: " . count($pdfs));
+                    $this->info("\033[35m📧 Remitente extraído: {$remitente}\033[0m");
+                    $this->info("\033[35m📝 Asunto del mensaje: {$asunto}\033[0m");
+                    $this->info("\033[35m📎 Número de PDFs adjuntos: " . count($pdfs) . "\033[0m");
 
-                if ($filterFrom && !str_contains(strtolower($remitente), $filterFrom)) {
-                    $this->line("⏭️  Omitido por filtro --from: {$remitente}");
-                    continue;
-                }
-
-                if ($filterSubject && !str_contains(strtolower($asunto), $filterSubject)) {
-                    $this->line("⏭️  Omitido por filtro --subject: {$asunto}");
-                    continue;
-                }
-
-                $parsedData = app(AirlineDetectorService::class)->parseFromMensaje($mensaje);
-
-                if (!empty($parsedData)) {
-                    $this->info("✅ Datos extraídos desde PDF.");
-                    Log::debug("📄 Resultado del parser PDF:", $parsedData);
-                } elseif (!empty($body)) {
-                    $contenidoLimpio = strip_tags($body);
-                    $longitudTexto = strlen(trim($contenidoLimpio));
-
-                    if (!$this->option('no-gemini') && $longitudTexto > 1000) {
-                        $this->info("🤖 Usando Gemini como fallback (texto: {$longitudTexto} caracteres)");
-                        $prompt = $this->construirPromptParaGemini($contenidoLimpio);
-                        $respuesta = $this->callGeminiApiViaHttp($prompt);
-
-                        if ($this->esJsonValido($respuesta)) {
-                            $parsedData = json_decode($respuesta, true);
-                            Log::debug("🤖 Gemini devolvió:", $parsedData);
-                        } else {
-                            $this->warn("⚠️ Gemini devolvió JSON inválido");
-                            Log::warning("⚠️ Gemini sin JSON válido: " . $respuesta);
-                        }
-                    } else {
-                        Log::info("🔁 Gemini evitado: texto insuficiente ({$longitudTexto}) o --no-gemini activado.");
-                    }
-                }
-
-                if (!$parsedData) {
-                    $this->warn("⚠️ No se pudieron extraer datos del mensaje {$mensaje['id']}");
-                    continue;
-                }
-
-                if ($this->option('dry-run')) {
-                    $this->info("🧪 DRY-RUN: Datos extraídos, no se guardará nada.");
-                    dump($parsedData);
-                    continue;
-                }
-
-                DB::beginTransaction();
-                try {
-                    $pd = $parsedData['pasajero_data'] ?? null;
-                    $pasajero = null;
-
-                    if (!empty($pd['nombre_unificado'])) {
-                        $nombreUnificado = $pd['nombre_unificado'];
-                        $nombreOriginal = $pd['nombre_original'] ?? null;
-
-                        $pasajero = Pasajero::where('nombre_unificado', $nombreUnificado)
-                            ->orWhereJsonContains('variantes', $nombreOriginal)
-                            ->first();
-
-                        if ($pasajero) {
-                            Log::info("🔄 Pasajero encontrado (por nombre_unificado o variante):", $pasajero->toArray());
-
-                            // Añadir variante si aún no está
-                            if ($nombreOriginal && !in_array($nombreOriginal, $pasajero->variantes ?? [])) {
-                                $variantes = $pasajero->variantes ?? [];
-                                $variantes[] = $nombreOriginal;
-                                $pasajero->variantes = array_values(array_unique($variantes));
-                                $pasajero->save();
-                                Log::info("🧩 Variante añadida a pasajero existente: {$nombreOriginal}");
-                            }
-                        } else {
-                            $pasajero = Pasajero::create([
-                                'nombre_unificado' => $nombreUnificado,
-                                'nombre_original' => $nombreOriginal,
-                                'variantes' => [],
-                            ]);
-                            Log::info("🆕 Pasajero creado:", $pasajero->toArray());
-                        }
-
-                    } else {
-                        $this->warn("⚠️ No se puede crear pasajero: falta nombre_unificado");
-                        Log::warning("❌ No se creó pasajero: falta nombre_unificado", ['mensaje_id' => $mensaje['id']]);
-                        DB::rollBack();
+                    if ($filterFrom && !str_contains(strtolower($remitente), $filterFrom)) {
+                        $this->line("\033[33m⏭️ Mensaje omitido por filtro --from: No coincide con {$remitente}\033[0m");
                         continue;
                     }
 
-                    $reservaBase = $parsedData['reserva_data'] ?? $parsedData;
-                    if (isset($reservaBase['tipo'])) {
-                        $reservaBase['tipo_reserva'] = $reservaBase['tipo'];
-                        unset($reservaBase['tipo']);
+                    if ($filterSubject && !str_contains(strtolower($asunto), $filterSubject)) {
+                        $this->line("\033[33m⏭️ Mensaje omitido por filtro --subject: No coincide con {$asunto}\033[0m");
+                        continue;
                     }
 
-                    $segmentos = $reservaBase['datos_adicionales']['segmentos_vuelo'] ?? [];
-                    Log::debug("🧩 Segmentos a guardar:", $segmentos);
+                    $this->info("\033[36m🔍 Intentando parsear datos desde el mensaje usando AirlineDetectorService...\033[0m");
+                    $parsedData = app(AirlineDetectorService::class)->parseFromMensaje($mensaje);
 
-                    $reservas = app(ReservationRegistrar::class)->guardar(
-                        $reservaBase,
-                        $segmentos,
-                        $pasajero,
-                        $mensaje['email_origen'],
-                        $mensaje['id'],
-                        $mensaje['content']['body'] ?? null
-                    );
-
-                    if ($reservas->isEmpty()) {
-                        $this->warn("⚠️ No se guardaron reservas (posible duplicado)");
-                        Log::warning("❗ Duplicados detectados, no se insertó", [
-                            'pasajero_id' => $pasajero->id,
-                            'mensaje_id' => $mensaje['id'],
-                        ]);
+                    // 💡 Normalizar múltiples o único resultado
+                    $parsedList = [];
+                    if (isset($parsedData['reserva_data'])) {
+                        $parsedList[] = $parsedData;
+                    } elseif (is_array($parsedData) && isset($parsedData[0]['reserva_data'])) {
+                        $parsedList = $parsedData;
                     } else {
-                        Log::info("📦 Se guardaron {$reservas->count()} reservas", [
-                            'pasajero_id' => $pasajero->id,
-                            'mensaje_id' => $mensaje['id'],
-                        ]);
-                        $this->info("✅ Reservas guardadas correctamente.");
+                        $parsedList[] = $parsedData;
                     }
 
-                    DB::commit();
+                    foreach ($parsedList as $parsed) {
+                        if (!$parsed) {
+                            $this->warn("\033[33m⚠️ Uno de los elementos del array está vacío. Saltando...\033[0m");
+                            continue;
+                        }
 
-                } catch (\Exception $e) {
-                    DB::rollBack();
-                    Log::error("❌ Error al guardar reservas", [
-                        'mensaje_id' => $mensaje['id'] ?? null,
-                        'email_origen' => $mensaje['email_origen'] ?? null,
-                        'exception' => $e->getMessage(),
-                        'trace' => Str::limit($e->getTraceAsString(), 1000),
-                    ]);
-                    $this->error("❌ Excepción: {$e->getMessage()}");
+                        if ($this->option('dry-run')) {
+                            $this->info("\033[33m🧪 Modo DRY-RUN activado: Mostrando datos extraídos sin guardar.\033[0m");
+                            dump($parsed);
+                            continue;
+                        }
+
+                        $this->info("\033[36m💾 Iniciando transacción de base de datos para guardar datos...\033[0m");
+                        DB::beginTransaction();
+                        try {
+                            $pd = $parsed['pasajero_data'] ?? null;
+                            $pasajero = null;
+
+                            if (!empty($pd['nombre_unificado'])) {
+                                $this->info("\033[35m👤 Datos de pasajero detectados. Nombre unificado: {$pd['nombre_unificado']}\033[0m");
+                                $nombreUnificado = $pd['nombre_unificado'];
+                                $nombreOriginal = $pd['nombre_original'] ?? null;
+
+                                $pasajero = Pasajero::where('nombre_unificado', $nombreUnificado)
+                                    ->orWhereJsonContains('variantes', $nombreOriginal)
+                                    ->first();
+
+                                if ($pasajero) {
+                                    $this->info("\033[32m🔄 Pasajero encontrado (ID: {$pasajero->id}).\033[0m");
+                                    if ($nombreOriginal && !in_array($nombreOriginal, $pasajero->variantes ?? [])) {
+                                        $variantes = $pasajero->variantes ?? [];
+                                        $variantes[] = $nombreOriginal;
+                                        $pasajero->variantes = array_values(array_unique($variantes));
+                                        $pasajero->save();
+                                        $this->info("\033[32m🧩 Variante añadida: {$nombreOriginal}\033[0m");
+                                    }
+                                } else {
+                                    $this->info("\033[32m🆕 Creando nuevo pasajero: {$nombreUnificado}\033[0m");
+                                    $pasajero = Pasajero::create([
+                                        'nombre_unificado' => $nombreUnificado,
+                                        'nombre_original' => $nombreOriginal,
+                                        'variantes' => [],
+                                    ]);
+                                }
+                            } else {
+                                $this->warn("\033[33m⚠️ Falta nombre_unificado. Revirtiendo...\033[0m");
+                                DB::rollBack();
+                                continue;
+                            }
+
+                            $reservaBase = $parsed['reserva_data'] ?? $parsed;
+                            if (isset($reservaBase['tipo'])) {
+                                $reservaBase['tipo_reserva'] = $reservaBase['tipo'];
+                                unset($reservaBase['tipo']);
+                            }
+
+                            $segmentos = $reservaBase['datos_adicionales']['segmentos_vuelo'] ?? [];
+                            $this->info("\033[35m🧩 Segmentos: " . count($segmentos) . "\033[0m");
+
+                            $reservas = app(ReservationRegistrar::class)->guardar(
+                                $reservaBase,
+                                $segmentos,
+                                $pasajero,
+                                $mensaje['email_origen'],
+                                $mensaje['id'],
+                                $mensaje['content']['body'] ?? null
+                            );
+
+                            if ($reservas->isEmpty()) {
+                                $this->warn("\033[33m⚠️ Reserva duplicada detectada.\033[0m");
+                            } else {
+                                $this->info("\033[32m✅ Se guardaron {$reservas->count()} reservas.\033[0m");
+                            }
+
+                            DB::commit();
+                            $this->info("\033[32m✅ Transacción confirmada.\033[0m");
+                        } catch (\Exception $e) {
+                            $this->error("\033[31m❌ Error al guardar reservas. Revirtiendo...\033[0m");
+                            DB::rollBack();
+                            Log::error("❌ Error al guardar reservas", [
+                                'mensaje_id' => $mensaje['id'] ?? null,
+                                'email_origen' => $mensaje['email_origen'] ?? null,
+                                'exception' => $e->getMessage(),
+                                'trace' => Str::limit($e->getTraceAsString(), 1000),
+                            ]);
+                        }
+                    }
                 }
-
+            } catch (\Exception $e) {
+                $this->error("\033[31m❌ Error crítico al procesar la cuenta {$user->email}: {$e->getMessage()}\033[0m");
             }
+
         }
         
         if (!$this->option('dry-run')) {
+            $this->info("\033[36m🗓️ Actualizando archivo de última ejecución con fecha actual: " . now()->toDateTimeString() . "\033[0m"); // Cyan for update
             Storage::disk('local')->put('ultima_ejecucion_vuelos.txt', now()->toDateTimeString());
-            $this->info("🗓️  Fecha de ejecución guardada: " . now()->toIso8601String());
+            $this->info("\033[32m🗓️ Fecha de ejecución guardada exitosamente.\033[0m"); // Green for success
         } else {
-            $this->warn("🧪 DRY-RUN: no se actualiza fecha de ejecución.");
+            $this->warn("\033[33m🧪 Modo DRY-RUN: No se actualiza el archivo de fecha de ejecución.\033[0m"); // Yellow for dry-run note
         }
 
+        $this->info("\033[32m🏁 Comando finalizado con éxito.\033[0m"); // Green for end
         return Command::SUCCESS;
     }
 
     private function callGeminiApiViaHttp(string $prompt): ?string
     {
+        $this->info("\033[36m🔑 Verificando clave API de Gemini...\033[0m"); // Cyan for check
         if (empty($this->geminiApiKey)) {
-            $this->error('❌ GEMINI_API_KEY no está configurado.');
+            $this->error("\033[31m❌ GEMINI_API_KEY no está configurado. No se puede llamar a la API.\033[0m"); // Red for error
             return null;
         }
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/{$this->geminiModelName}:generateContent?key={$this->geminiApiKey}";
+        $url = $this->geminiApiUrl . '?key=' . $this->geminiApiKey;
+        $this->info("\033[36m📡 Preparando llamada HTTP a Gemini API en: {$url}\033[0m"); // Cyan for prep
 
         $response = Http::timeout(120)->retry(2, 1000)->withHeaders([
             'Content-Type' => 'application/json',
@@ -255,16 +312,18 @@ class ExtraeVuelos extends Command
         ]);
 
         if ($response->failed()) {
-            $this->error("❌ Error de Gemini API ({$response->status()}): " . mb_substr($response->body(), 0, 300));
+            $this->error("\033[31m❌ Error en llamada a Gemini API (Status: {$response->status()}): " . mb_substr($response->body(), 0, 300) . "\033[0m"); // Red for failure
             Log::error("❌ Gemini API error: " . $response->body());
             return null;
         }
 
+        $this->info("\033[32m✅ Respuesta de Gemini recibida exitosamente.\033[0m"); // Green for success
         return $response->json('candidates.0.content.parts.0.text');
     }
 
     private function construirPromptParaGemini(string $body): string
     {
+        $this->info("\033[36m🛠️ Construyendo prompt para Gemini con instrucciones y texto del email...\033[0m"); // Cyan for building
         $instrucciones = "Analiza el siguiente email relacionado con una reserva aérea. Extrae los datos en JSON con este formato: 
 {
   \"tipo\": \"vuelo\",
@@ -286,16 +345,31 @@ Responde únicamente con el JSON. No expliques nada.";
 
     private function extraerEmailReal(string $fromHeader): string
     {
+        $this->info("\033[36m📧 Extrayendo email real del header 'From': {$fromHeader}\033[0m"); // Cyan for extraction
         if (preg_match('/<(.+?)>/', $fromHeader, $coincidencias)) {
-            return strtolower($coincidencias[1]);
+            $email = strtolower($coincidencias[1]);
+            $this->info("\033[32m✅ Email extraído de ángulos: {$email}\033[0m"); // Green for success
+            return $email;
         }
-        return strtolower(trim($fromHeader));
+        $email = strtolower(trim($fromHeader));
+        $this->info("\033[32m✅ Email extraído directamente: {$email}\033[0m"); // Green for success
+        return $email;
     }
 
     private function esJsonValido(?string $str): bool
     {
-        if (empty($str)) return false;
+        $this->info("\033[36m🧐 Validando si la respuesta es JSON válido...\033[0m"); // Cyan for validation
+        if (empty($str)) {
+            $this->info("\033[33m❌ Cadena vacía, no es JSON válido.\033[0m"); // Yellow for invalid
+            return false;
+        }
         json_decode($str);
-        return json_last_error() === JSON_ERROR_NONE;
+        $esValido = json_last_error() === JSON_ERROR_NONE;
+        if ($esValido) {
+            $this->info("\033[32m✅ Es JSON válido.\033[0m"); // Green for valid
+        } else {
+            $this->info("\033[33m❌ No es JSON válido (Error: " . json_last_error_msg() . ")\033[0m"); // Yellow for invalid
+        }
+        return $esValido;
     }
 }

@@ -1,0 +1,3 @@
+@if ($formatted())
+    {{ $formatted()}}
+@endif

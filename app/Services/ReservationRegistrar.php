@@ -15,8 +15,8 @@ class ReservationRegistrar
 
         foreach ($segmentos as $segmento) {
             $existe = Reserva::where('pasajero_id', $pasajero->id)
-                ->where('numero_vuelo', $segmento['numero_vuelo'] ?? null)
                 ->where('fecha_inicio', $segmento['fecha_salida'] ?? null)
+                ->where('fecha_fin', $segmento['fecha_llegada'] ?? null)
                 ->exists();
 
             if ($existe) {

@@ -37,7 +37,6 @@ return [
         'timezone'   => 'UTC',
     ],
     
-    'accounts' => explode(',', env('GEMINI_ALLOWED_EMAILS', '')),
     'max_body_length' => 10000, // Longitud máxima del cuerpo del email para enviar a Gemini
     'airline' => [
         'description' => 'Prompt para extraer información de reservas de vuelos.',

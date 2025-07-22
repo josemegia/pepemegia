@@ -2,6 +2,17 @@
 
 return [
 
+    'pdf_pase_path_copa' => 'data/BoardingPass.pdf', 
+    'pdf_ticket_path_copa' => 'data/copaairline.pdf', 
+    'domain_prefix' => env('APP_DOMAIN_PREFIX', ''),
+    '4life' => 'usspanish.4life.com',
+    'iso2' => 'es',
+    'domain_map' => [
+        'pepemegia.com'     => 'Pepe Megía',
+        '4life.ovh'         => '4Life - Afiliado',
+        'chicoplantas.com'  => 'Chico Plantas',
+        'default'           => 'PepeMegia.com',
+    ],
     /*
     |--------------------------------------------------------------------------
     | Application Name
@@ -78,7 +89,7 @@ return [
     |
     */
 
-    'locale' => env('APP_LOCALE', 'en'),
+    'locale' => env('APP_LOCALE', 'es'),
 
     'fallback_locale' => env('APP_FALLBACK_LOCALE', 'en'),
 
@@ -122,5 +133,4 @@ return [
         'driver' => env('APP_MAINTENANCE_DRIVER', 'file'),
         'store' => env('APP_MAINTENANCE_STORE', 'database'),
     ],
-
 ];

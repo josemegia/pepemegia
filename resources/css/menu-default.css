@@ -1,0 +1,121 @@
+/* Estilos menú "default" - premium glassmorphism y detalles */
+.menu-default .main-nav-ul {
+    @apply flex flex-col md:flex-row md:items-center gap-y-2 md:gap-y-0 md:gap-x-3 px-2 md:px-0 py-2 md:py-0;
+    @apply w-full md:w-auto;
+    @apply bg-white/60 dark:bg-gray-900/60 backdrop-blur-lg shadow-xl;
+    @apply rounded-xl md:rounded-full;
+    border: 1.2px solid rgba(100, 100, 255, 0.10);
+}
+
+.menu-default .nav-link {
+    @apply flex items-center px-3 py-1.5 md:px-2.5 md:py-1 rounded-lg font-semibold transition-all duration-300 ease-in-out w-full md:w-auto;
+    @apply text-gray-800 dark:text-gray-100 bg-transparent relative;
+    @apply hover:bg-gradient-to-r hover:from-blue-100/70 hover:to-blue-50/40 dark:hover:from-blue-800/50 dark:hover:to-blue-900/30;
+    @apply hover:shadow-lg hover:text-blue-600 dark:hover:text-blue-300;
+    @apply focus:outline-none focus:ring-2 focus:ring-blue-300/70 focus:ring-opacity-80;
+    overflow: hidden;
+    z-index: 1;
+    min-width: 0;
+    max-width: 100vw; /* Mantener, pero no debería afectar submenús */
+    font-size: 1rem;
+}
+.menu-default .nav-link:before {
+    content: "";
+    @apply absolute left-0 top-0 h-full w-1 rounded-l-lg bg-gradient-to-b from-blue-400 via-blue-600 to-purple-400 opacity-0;
+    transition: opacity 0.3s;
+}
+.menu-default .nav-link:hover:before {
+    opacity: 1;
+}
+
+.menu-default .nav-link.active, .menu-default .nav-link[aria-current="page"] {
+    @apply text-white;
+    background: linear-gradient(90deg, #60a5fa 10%, #818cf8 100%);
+    box-shadow: 0 2px 16px 2px #93c5fd33;
+    font-weight: 700;
+}
+.menu-default .nav-link.active:before,
+.menu-default .nav-link[aria-current="page"]:before {
+    opacity: 1 !important;
+}
+
+.menu-default .nav-link i {
+    @apply mr-2 text-base drop-shadow-sm;
+    transition: filter 0.2s, color 0.2s;
+}
+.menu-default .nav-link:hover i {
+    filter: drop-shadow(0 0 5px #60a5fa88);
+    color: #60a5fa;
+}
+
+.menu-default .dropdown-menu {
+    @apply absolute bg-white/90 dark:bg-gray-900/95 shadow-2xl rounded-lg mt-2 py-1 z-50 md:top-full md:left-0 md:min-w-[150px];
+    border: 1.2px solid rgba(96,165,250,0.10);
+    animation: dropdownFadeIn 0.21s cubic-bezier(.4,2,.2,1) both;
+    backdrop-filter: blur(10px) saturate(1.13);
+    max-width: none; /* Cambiado de 94vw a none para permitir expansión completa */
+    min-width: 150px; /* Mantener como mínimo, ajusta si es necesario */
+    max-height: 70vh; /* Aumentado de 48vh a 70vh para más espacio */
+    overflow-y: auto; /* Añadido para forzar la barra de desplazamiento vertical */
+}
+@keyframes dropdownFadeIn {
+    0% { opacity: 0; transform: translateY(-10px) scale(.99);}
+    100% { opacity: 1; transform: translateY(0) scale(1);}
+}
+
+.menu-default .dropdown-menu a,
+.menu-default .dropdown-menu button {
+    @apply block px-3 py-1.5 text-[0.98rem] text-gray-700 dark:text-gray-200 rounded transition-all duration-200 ease-in-out;
+    @apply hover:bg-gradient-to-r hover:from-blue-100 hover:to-blue-50 dark:hover:from-blue-800 dark:hover:to-blue-900;
+    @apply hover:text-blue-700 dark:hover:text-blue-300;
+    @apply whitespace-nowrap w-full text-left;
+    letter-spacing: .01em;
+    font-weight: 500;
+}
+
+.menu-default .dropdown-nested .dropdown-menu {
+    @apply md:absolute md:left-full md:top-0 md:mt-0 md:ml-2 w-auto; /* Cambiado de w-full a w-auto para ajuste al contenido */
+    box-shadow: 0 4px 40px 0 #6366f13a;
+}
+
+.menu-default .dropdown-menu {
+    scrollbar-width: thin;
+    scrollbar-color: #60a5fa #dbeafe;
+    max-height: 70vh; /* Alineado con el cambio anterior */
+}
+.menu-default .dropdown-menu::-webkit-scrollbar {
+    height: 3px;
+    width: 6px;
+    background: #e0e7ff22;
+    border-radius: 999px;
+}
+.menu-default .dropdown-menu::-webkit-scrollbar-thumb {
+    background: #60a5fa55;
+    border-radius: 999px;
+}
+
+.menu-default .dropdown-menu,
+.menu-default .nav-link,
+.menu-default .dropdown-menu a,
+.menu-default .dropdown-menu button {
+    transition: all .18s cubic-bezier(.4,2,.2,1);
+}
+
+@media (max-width: 767px) {
+    .menu-default .main-nav-ul {
+        background: rgba(255, 255, 255, 0.68);
+        backdrop-filter: blur(14px) saturate(1.2);
+        box-shadow: 0 4px 40px 0 #60a5fa11, 0 8px 60px 0 #0002;
+        border-radius: 1em;
+        gap: 0.7em;
+        padding-left: 0.25em;
+        padding-right: 0.25em;
+    }
+    .menu-default .dropdown-menu {
+        background: rgba(255,255,255,0.96);
+    }
+}
+
+.menu-default .nav-link:active {
+    transform: scale(.985);
+}

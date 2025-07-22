@@ -1,4 +1,4 @@
-<?php // app/Models/IsoCountryCode.php
+<?php
 
 namespace App\Models;
 
@@ -9,48 +9,66 @@ class IsoCountryCode extends Model
 {
     use HasFactory;
 
-    /**
-     * La tabla asociada con el modelo.
-     *
-     * @var string
-     */
-    protected $table = 't_iso2'; // Especifica el nombre exacto de tu tabla
+    protected $table = 't_iso2';
+    protected $primaryKey = 'iso2';
+    public $incrementing = false;
+    protected $keyType = 'string';
+    public $timestamps = false;
 
     /**
-     * La clave primaria para el modelo.
-     *
-     * @var string
-     */
-    protected $primaryKey = 'iso2'; // Tu clave primaria es 'iso2'
-
-    /**
-     * Indica si la clave primaria es autoincremental.
-     *
-     * @var bool
-     */
-    public $incrementing = false; // 'iso2' no es autoincremental
-
-    /**
-     * El "type" de la clave primaria autoincremental.
-     *
-     * @var string
-     */
-    protected $keyType = 'string'; // 'iso2' es char/string
-
-    /**
-     * Indica si el modelo debe tener timestamps.
-     *
-     * @var bool
-     */
-    public $timestamps = false; // Asumo que no tienes created_at/updated_at en t_iso2
-
-    /**
-     * Los atributos que son asignables masivamente.
+     * The attributes that are mass assignable.
      *
      * @var array<int, string>
      */
     protected $fillable = [
         'iso2',
+        'iso3',
         'pais',
+        'lang', // <-- Se añade el nuevo campo aquí
+        'counter',
     ];
+
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'counter' => 'integer',
+    ];
+
+    /**
+     * Convierte un código ISO3 a ISO2.
+     *
+     * @param string $iso3
+     * @return string|null
+     */
+    public static function iso3toIso2($iso3)
+    {
+        return static::where('iso3', strtolower($iso3))->value('iso2');
+    }
+    
+    /**
+     * Convierte un código ISO2 a ISO3.
+     *
+     * @param string $iso2
+     * @return string|null
+     */
+    public static function iso2toIso3($iso2)
+    {
+        return static::where('iso2', strtolower($iso2))->value('iso3');
+    }
+
+    /**
+     * Obtiene el código de idioma principal (ISO 639-1) para un país dado su código ISO2.
+     *
+     * @param string $iso2 El código de país de 2 letras (ej. 'ES', 'GR').
+     * @return string|null El código de idioma de 2 letras (ej. 'es', 'el') o null si no se encuentra.
+     */
+    public static function getLangForIso2($iso2)
+    {
+        // Busca el registro por su llave primaria (iso2) y devuelve el valor de la columna 'lang'.
+        // Usamos find() porque es más eficiente para buscar por llave primaria.
+        return static::find(strtoupper($iso2))?->lang;
+    }
 }

@@ -200,12 +200,12 @@ return [
         'keywords'      => ['Booking ref:', 'PNR:']
     ],
 
-    'copa_airlines' => [ // O la clave que uses para Copa
-        'type'            => 'vuelo', // O 'servicio_vuelo' si quieres diferenciarlo de un billete completo
-        'friendly_name'   => 'Copa Airlines',
-        'senders'         => ['noreply@css.copaair.com', 'e-ticket@copaair.com', /*otros senders de Copa*/],
-        'domains'         => ['copaair.com', 'copa.com', 'css.copaair.com'], // css.copaair.com es importante aquí
-        'gmail_query_tags'=> ['subject:(receipt OR compra OR e-ticket OR itinerario OR reserva OR confirmación) from:(copaair.com OR css.copaair.com OR copa.com) has:attachment filename:pdf'],
+    'copa_airlines' => [
+        'friendly_name'   => 'Copa',
+        'function'        => true,
+        'senders'         => ['noreply@css.copaair.com', 'e-ticket@copaair.com', 'pedro4life09@yahoo.com', 'noreply@selfcheckin.copaair.com', 'upgrades@copaair.com' /* ...otros... */],
+        'domains'         => ['copaair.com', 'copa.com', 'css.copaair.com'],
+        'gmail_query_tags'=> ['subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass" OR "Pase de Abordar") from:(copaair.com OR css.copaair.com OR copa.com OR pedro4life09@yahoo.com) has:attachment filename:pdf'],
         'specific_keywords'=> ['Record Locator:', 'Número de reserva:', 'Purchase Receipt', 'EMD']
     ],
 
