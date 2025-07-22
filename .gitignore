@@ -16,6 +16,7 @@
 /public/build
 /public/hot
 /public/storage
+/python/venv
 /storage/framework
 /storage/app/private
 /storage/*.key
@@ -26,3 +27,4 @@ Homestead.yaml
 npm-debug.log
 Thumbs.db
 yarn-error.log
+node_modules
