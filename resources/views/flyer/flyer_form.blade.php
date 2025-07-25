@@ -25,7 +25,13 @@
 
         <x-flyer.speaker-fields :data="$data" />
 
-        <x-flyer.event-details-fields :data="$data" />
+        <x-flyer.event-details-fields
+            :data="$data"
+            :regions="$regions"
+            :region="$defaultregion"
+        />
+
+        <x-flyer.event-details-display :data="$data" />
         
         <button type="submit" class="w-full text-white bg-blue-600 hover:bg-blue-700 focus:ring-4 focus:outline-none focus:ring-blue-800 font-medium rounded-lg text-sm px-5 py-3 text-center mt-6 transition-colors duration-300">Guardar Cambios y Ver Flyer</button>
     </form>

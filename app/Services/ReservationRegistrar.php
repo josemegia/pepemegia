@@ -11,17 +11,20 @@ class ReservationRegistrar
 {
     public function guardar(array $reservaData, array $segmentos, Pasajero $pasajero, string $emailOrigen, ?string $mensajeId = null, ?string $contenidoEmail = null): Collection
     {
+        $emailOrigen = $emailOrigen ?: config('services.gemini.accounts')[0] ?? 'fallback@example.com';
+        
         $reservas = collect();
 
         foreach ($segmentos as $segmento) {
             $existe = Reserva::where('pasajero_id', $pasajero->id)
                 ->where('fecha_inicio', $segmento['fecha_salida'] ?? null)
-                ->where('fecha_fin', $segmento['fecha_llegada'] ?? null)
+                ->where('aeropuerto_origen_iata', $segmento['aeropuerto_origen_iata'] ?? null)
                 ->exists();
 
             if ($existe) {
                 Log::warning("Reserva duplicada detectada. No se registró. Detalles:", [
                     'pasajero_id'     => $pasajero->id,
+                    'numero_reserva'  => $reservaData['numero_reserva'] ?? null,
                     'numero_vuelo'    => $segmento['numero_vuelo'] ?? null,
                     'fecha_salida'    => $segmento['fecha_salida'] ?? null,
                     'fecha_llegada'   => $segmento['fecha_llegada'] ?? null,
@@ -58,8 +61,8 @@ class ReservationRegistrar
                     'terminal_salida'       => $segmento['terminal_salida'] ?? null,
                     'terminal_llegada'      => $segmento['terminal_llegada'] ?? null
                 ],
-                'contenido_email'          => $contenidoEmail,
-                'mensaje_id'               => $mensajeId,
+                'contenido_email'          => $contenidoEmail ?? null,
+                'mensaje_id'               => $mensajeId ?? 'importacion_desde_consola',
             ]);
 
             $reservas->push($reserva);

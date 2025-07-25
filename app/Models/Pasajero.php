@@ -20,4 +20,9 @@ class Pasajero extends Model
     protected $casts = [
         'variantes' => 'array',
     ];
+    
+    public function reservas()
+    {
+        return $this->hasMany(Reserva::class);
+    }
 }

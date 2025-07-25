@@ -5,6 +5,8 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Session;
 
+use App\Services\ShortUrlService;
+
 // Controllers
 use App\Http\Controllers\FlyerController;
 use App\Http\Controllers\ShortUrlController;
@@ -116,7 +118,7 @@ Route::middleware('auth')->group(function () {
     });
 });
 
-Route::fallback(function () {
-    return redirect()->away('https://' . config('app.4life'). '/' . ltrim(request()->path(), '/'), 302);
-    //return response()->view('errors.404', [], 404);
+Route::fallback(function (Request $request, ShortUrlService $shortUrlService) {
+    $path = ltrim($request->path(), '/');
+    return $shortUrlService->handleFallback($path);
 });

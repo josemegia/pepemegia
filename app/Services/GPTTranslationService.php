@@ -8,15 +8,14 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 /**
- * GPTTranslationService (Versión Pura con Inyección de Dependencias)
+ * GPTTranslationService (Versión optimizada y robusta)
  *
- * Esta versión está diseñada para ser inyectada en constructores o métodos
- * por el contenedor de servicios de Laravel. No contiene métodos estáticos públicos.
+ * Diseñada para ser inyectada como servicio en controladores, comandos o jobs.
  */
 class GPTTranslationService
 {
     /**
-     * Lógica para procesar un directorio completo de archivos PHP.
+     * Traduce todos los archivos PHP en un directorio de idioma.
      */
     public function processDirectoryTranslation(string $targetIso, string $sourceIso = 'es'): void
     {
@@ -33,14 +32,14 @@ class GPTTranslationService
 
         foreach ($items as $file) {
             if ($file->getExtension() !== 'php') continue;
-            
+
             $relativePath = str_replace($sourceDir . DIRECTORY_SEPARATOR, '', $file->getPathname());
             $this->processSingleFileTranslation($relativePath, $targetIso, $sourceIso);
         }
     }
 
     /**
-     * Lógica para procesar un solo archivo PHP de forma incremental.
+     * Traduce un solo archivo de forma incremental.
      */
     public function processSingleFileTranslation(string $filename, string $targetIso, string $sourceIso = 'es'): bool
     {
@@ -64,13 +63,15 @@ class GPTTranslationService
         if (!File::exists(dirname($targetPath))) {
             File::makeDirectory(dirname($targetPath), 0755, true, true);
         }
+
         file_put_contents($targetPath, '<?php return ' . var_export($finalArray, true) . ';');
         Log::info("GPTS: Archivo incremental guardado: $targetPath");
+
         return true;
     }
 
     /**
-     * Lógica incremental para comparar dos arrays y traducir las claves faltantes.
+     * Traduce solo las claves faltantes entre source y target.
      */
     public function translateArrayIncremental(array $source, array $target, string $targetIso, string $sourceIso): array
     {
@@ -81,7 +82,7 @@ class GPTTranslationService
 
         $newTranslations = [];
         if (!empty($keysToTranslate)) {
-            Log::info("GPTS (PHP): " . count($keysToTranslate) . " claves nuevas para traducir.");
+            Log::info("GPTS: " . count($keysToTranslate) . " claves nuevas para traducir.");
             $newTranslations = $this->translateBatch($keysToTranslate, $targetIso, $sourceIso);
         }
 
@@ -90,31 +91,44 @@ class GPTTranslationService
     }
 
     /**
-     * Método central de traducción por lotes. Es público para ser usado por cualquier comando.
+     * Traduce un lote de textos usando la API de OpenAI.
      */
     public function translateBatch(array $texts, string $targetIso, string $sourceIso): array
     {
-        if (empty($texts)) {
-            return [];
-        }
+        if (empty($texts)) return [];
 
         $textsToTranslate = array_filter($texts, function ($value, $key) {
             return is_string($value) && trim($value) !== '' && !str_contains($key, 'niveles');
         }, ARRAY_FILTER_USE_BOTH);
 
-        if (empty($textsToTranslate)) {
-            return $texts;
-        }
-
-        $jsonToTranslate = json_encode($textsToTranslate, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-        
-        $prompt = "Traduce el siguiente objeto JSON del idioma '$sourceIso' al '$targetIso'. Mantén intactas las claves del JSON. No traduzcas ni cambies ningún código HTML, etiquetas ni placeholders dinámicos como :attribute. Responde únicamente con el objeto JSON traducido, sin explicaciones.\n\nJSON a traducir:\n$jsonToTranslate";
+        if (empty($textsToTranslate)) return $texts;
 
         $config = config('services.openai');
         $apiKey = $config['api_key'] ?? null;
 
+        if (!$apiKey) {
+            Log::warning("GPTS: Falta API Key para OpenAI.");
+            return $texts;
+        }
+
+        // Modo simulado para desarrollo
+        if (($config['simulate'] ?? false) === true) {
+            Log::info("GPTS: Modo simulado activado.");
+            return collect($textsToTranslate)
+                ->mapWithKeys(fn($v, $k) => [$k => "[{$targetIso}] $v"])
+                ->toArray() + $texts;
+        }
+
+        $prompt = $this->buildPrompt($textsToTranslate, $sourceIso, $targetIso);
+        $start = microtime(true);
+
         try {
-            $response = Http::withHeaders(['Authorization' => 'Bearer ' . $apiKey, 'Content-Type' => 'application/json'])
+            $response = Http::withHeaders([
+                    'Authorization' => 'Bearer ' . $apiKey,
+                    'Content-Type' => 'application/json',
+                ])
+                ->timeout(60)
+                ->retry(3, 2000)
                 ->post('https://api.openai.com/v1/chat/completions', [
                     'model' => $config['gpt'] ?? 'gpt-4o',
                     'messages' => [['role' => 'user', 'content' => $prompt]],
@@ -127,6 +141,9 @@ class GPTTranslationService
                 return $texts;
             }
 
+            $duration = round(microtime(true) - $start, 2);
+            Log::info("GPTS: Traducción completada en {$duration}s.");
+
             $translatedValues = json_decode($response->json()['choices'][0]['message']['content'], true);
             return array_merge($texts, $translatedValues ?? []);
 
@@ -137,7 +154,16 @@ class GPTTranslationService
     }
 
     /**
-     * Utilidad para normalizar códigos de idioma. Pública para ser usada desde los comandos.
+     * Genera el prompt para la API de traducción.
+     */
+    private function buildPrompt(array $texts, string $sourceIso, string $targetIso): string
+    {
+        $json = json_encode($texts, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        return "Traduce el siguiente objeto JSON del idioma '$sourceIso' al '$targetIso'. Mantén intactas las claves del JSON. No traduzcas ni cambies ningún código HTML, etiquetas ni placeholders dinámicos como :attribute. Responde únicamente con el objeto JSON traducido, sin explicaciones.\n\nJSON a traducir:\n$json";
+    }
+
+    /**
+     * Normaliza el formato del locale.
      */
     public function normalizeLocale(string $locale): string
     {
@@ -148,7 +174,7 @@ class GPTTranslationService
     }
 
     /**
-     * Utilidad para reconstruir un array anidado.
+     * Reconstruye un array anidado desde un array plano.
      */
     private function unflatten(array $array): array
     {

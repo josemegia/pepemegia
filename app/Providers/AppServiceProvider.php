@@ -5,13 +5,17 @@ namespace App\Providers;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Router;
-use Illuminate\Support\Facades\Blade;
-use Illuminate\Support\Facades\File;
-use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\View;
-use Illuminate\Support\ServiceProvider;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Gate;
+
+use Illuminate\Support\{
+    Collection,
+    ServiceProvider,
+    Str,
+    Facades\Blade,
+    Facades\File,
+    Facades\RateLimiter,
+    Facades\View,
+    Facades\Gate
+    };
 
 use Laravel\Fortify\Contracts\CreatesNewUsers;
 use Laravel\Fortify\Fortify;
@@ -67,7 +71,7 @@ class AppServiceProvider extends ServiceProvider
                 'filesystems.public.url'            => $schemeHost.'/storage',
                 'fourlife.default.email'            => 'admin@'.$host,
                 'fourlife.default.dominio'          => $host,
-                'services.twitter-oauth-2.redirect' => $schemeHost . env('TWITTER_REDIRECT_URI'),
+                'services.twitter-oauth-2.redirect'         => $schemeHost . env('TWITTER_REDIRECT_URI'),
                 'services.github.redirect'          => $schemeHost . env('GITHUB_REDIRECT_URI'),
                 'services.google.redirect'          => $schemeHost . env('GOOGLE_OAUTH_REDIRECT_URI'),
             ]);
@@ -85,33 +89,22 @@ class AppServiceProvider extends ServiceProvider
             }
         });
     }
-    /**
-     * Registra el binding para la creación de usuarios (Fortify).
-     */
+
     protected function registerUserBindings(): void
     {
         $this->app->singleton(CreatesNewUsers::class, CreateNewUser::class);
     }
 
-    /**
-     * Registra componentes de Blade personalizados.
-     */
     protected function registerBladeComponents(): void
     {
         Blade::component('language-selector', LanguageSelector::class);
     }
 
-    /**
-     * Registra alias personalizados para middlewares.
-     */
     protected function registerMiddlewareAliases(Router $router): void
     {
         $router->aliasMiddleware('admin', CheckAdminRole::class);
     }
 
-    /**
-     * Configura los límites de velocidad de acceso (login, 2FA).
-     */
     protected function configureRateLimiting(): void
     {
         $this->app->booted(function () {
@@ -128,9 +121,6 @@ class AppServiceProvider extends ServiceProvider
         });
     }
 
-    /**
-     * Define las vistas personalizadas para Fortify.
-     */
     protected function registerFortifyViews(): void
     {
         Fortify::loginView(fn () => view('auth.login'));
@@ -139,13 +129,10 @@ class AppServiceProvider extends ServiceProvider
         Fortify::resetPasswordView(fn (Request $request) => view('auth.reset-password', ['request' => $request]));
     }
 
-    /**
-     * Comparte con las vistas el array de idiomas y banderas disponibles.
-     */
     protected function shareAvailableLocales(): void
     {
         $locales = LocaleManager::getAvailableLocales();
-        if (is_a($locales, \Illuminate\Support\Collection::class)) {
+        if (is_a($locales, Collection::class)) {
             $locales = $locales->toArray();
         } elseif (!is_array($locales)) {
             $locales = ['es' => 'es'];

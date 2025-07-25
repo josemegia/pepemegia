@@ -2,9 +2,9 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Controller; 
+use App\Http\Controllers\Controller;
 use App\Models\Reserva;
-use App\Models\AirportReference; // Asegúrate que este modelo exista y esté correcto
+use App\Models\AirportReference;
 use App\Models\IsoCountryCode; 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;

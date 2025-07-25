@@ -3,16 +3,19 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\{
     Session,
     Storage,
     File,
     Log
 };
-use Illuminate\Support\Str;
+use libphonenumber\PhoneNumberUtil;
 use Carbon\Carbon;
 
-use App\Models\ShortUrl;
+use App\Services\ShortUrlService;
+use App\Services\PhoneNumberService;
+
 use App\Jobs\FlyerJob;
 
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -23,6 +26,15 @@ use Intervention\Image\Drivers\Imagick\Driver;
 
 class FlyerController extends Controller
 {
+    protected ShortUrlService $shortener;
+    protected PhoneNumberService $phoneService;
+
+    public function __construct(ShortUrlService $shortener, PhoneNumberService $phoneService)
+    {
+        $this->shortener = $shortener;
+        $this->phoneService = $phoneService;
+    }
+
     /**
      * Muestra la página principal del flyer para el "administrador".
      * Permite la rotación de temas y carga el formato guardado o por defecto.
@@ -130,11 +142,23 @@ class FlyerController extends Controller
      */
     public function showForm()
     {
-        // Carga los datos actuales del flyer para pre-llenar el formulario
         $data = $this->loadFlyerData();
-        $formats = config('flyer.formats'); // Pasa todos los formatos disponibles para el dropdown
+        $formats = config('flyer.formats');
+        $phoneUtil = PhoneNumberUtil::getInstance();
+        $regions = $phoneUtil->getSupportedRegions();
+        $defaultregion = $data['event']['phone_country'] ?? config('app.iso2', 'CO');
 
-        return view('flyer.flyer_form', ['data' => $data, 'formats' => $formats, 'theme' => '', 'is_shared_view' => false, 'uuid' => null, 'filename' => null, 'current_format_name' => null ]);
+        return view('flyer.flyer_form', [
+            'data' => $data,
+            'formats' => $formats,
+            'theme' => '',
+            'is_shared_view' => false,
+            'uuid' => null,
+            'filename' => null,
+            'current_format_name' => null,
+            'regions' => $regions,
+            'defaultregion' => $defaultregion,
+        ]);
     }
 
     /**
@@ -177,6 +201,8 @@ class FlyerController extends Controller
             'cta_link' => 'required|url',
             'speaker_image' => 'nullable|image|mimes:jpeg,png,jpg,gif,webp|max:30000',
             'flyer_format' => 'required|string|in:' . implode(',', array_keys(config('flyer.formats'))),
+            'event_phone_country' => 'nullable|string|size:2',
+            'event_phone' => 'nullable|string|max:20',
         ]);
 
         Log::info('Validation passed for speaker_image.');
@@ -290,6 +316,27 @@ class FlyerController extends Controller
             }
         }
 
+        $eventPhone = $request->event_phone;
+        $eventPhoneCountry = $request->event_phone_country ?? config('app.iso2', 'CO');
+
+        $phoneValidationFailed = false;
+        $formattedPhone = null;
+
+        if ($eventPhone) {
+            if (!$this->phoneService->isValid($eventPhone, $eventPhoneCountry)) {
+                $phoneValidationFailed = true;
+                Log::warning("Número de teléfono inválido para país $eventPhoneCountry: $eventPhone");
+            } else {
+                $formattedPhone = $this->phoneService->formatNational($eventPhone, $eventPhoneCountry);
+                Log::info("Número de teléfono formateado: $formattedPhone");
+            }
+        }
+
+        $formattedInternational = null;
+        if ($eventPhone && !$phoneValidationFailed) {
+            $formattedInternational = $this->phoneService->formatInternational($eventPhone, $eventPhoneCountry);
+        }
+
         // Construir los datos que se van a guardar
         $dataToSave = [
             'format' => $request->flyer_format,
@@ -303,6 +350,9 @@ class FlyerController extends Controller
                 'time' => $request->event_time,
                 'platform' => $request->event_platform,
                 'platform_details' => $request->event_platform_details,
+                'phone_country' => $eventPhoneCountry,
+                'phone' => $formattedPhone ?? $eventPhone,
+                'phone_international' => $formattedInternational ?? null,
             ],
             'speaker' => [
                 'name' => $request->speaker_name,
@@ -346,7 +396,7 @@ class FlyerController extends Controller
                 'filename' => $filename
             ]);
 
-            $sharedLink = $this->generateAndStoreShortUrl($longSharedLink);
+            $sharedLink = $this->shortener->generate($longSharedLink);
 
             Log::info('Shared link generated: ' . $sharedLink);
                 
@@ -364,6 +414,10 @@ class FlyerController extends Controller
         }
 
         Log::info('--- FIN DE PROCESO DE SUBIDA DE FLYER ---');
+        
+        if ($phoneValidationFailed) {
+            $flashData['warning'] = 'El número de teléfono no es un móvil válido para el país seleccionado.';
+        }
 
         // ✅ Aplicar los mensajes con ->with() en el return
         return $redirect->with($flashData);
@@ -394,37 +448,6 @@ class FlyerController extends Controller
         session()->forget('current_flyer_theme');
 
         return redirect()->route('flyer.show')->with('message', 'Flyer restaurado a formato y tema por defecto.');
-    }
-
-    /**
-     * Genera y almacena una URL corta para una URL larga dada.
-     * Reutiliza una existente si ya hay una para esa URL larga.
-     */
-    protected function generateAndStoreShortUrl(string $longUrl): string
-    {
-        // Opcional: Primero, intenta encontrar si esta URL larga ya tiene un código corto asignado.
-        // Esto evita crear múltiples códigos cortos para la misma URL larga.
-        $existingShortUrl = ShortUrl::where('long_url', $longUrl)->first();
-
-        if ($existingShortUrl) {
-            // Si ya existe, devuelve la URL corta existente.
-            return route('shorturl.show', $existingShortUrl->short_code);
-        }
-
-        // Genera un código corto único (ej. 6 caracteres alfanuméricos)
-        $shortCode = '';
-        do {
-            $shortCode = Str::random(6); // Puedes ajustar la longitud si 6 no es suficiente
-        } while (ShortUrl::where('short_code', $shortCode)->exists()); // Asegúrate de que no exista ya
-
-        // Crea un nuevo registro en la base de datos
-        $shortUrl = ShortUrl::create([
-            'long_url' => $longUrl,
-            'short_code' => $shortCode,
-        ]);
-
-        // Construye y devuelve la URL corta completa usando la ruta nombrada
-        return route('shorturl.show', $shortUrl->short_code);
     }
 
     /**

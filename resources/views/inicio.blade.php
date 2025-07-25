@@ -10,8 +10,27 @@
     {{-- La navbar NO va aquí, ya es manejada por <x-menu /> en layouts/app.blade.php --}}
 
     {{-- Sección HERO --}}
+    {{-- La clase 'relative' en el header es crucial para posicionar el video y el overlay correctamente --}}
     <header class="hero-section relative">
+        {{-- INICIO: VIDEO DE FONDO --}}
+        {{-- Añadimos la etiqueta <video> para el fondo.
+             - autoplay: Inicia el video automáticamente.
+             - loop: Repite el video indefinidamente.
+             - muted: Esencial para que el autoplay funcione en la mayoría de los navegadores modernos.
+             - playsinline: Evita que el video se ponga en pantalla completa en móviles (iOS).
+             - La función asset() de Laravel genera la URL correcta al archivo en la carpeta 'public'.
+        --}}
+        <video autoplay loop muted playsinline class="hero-video">
+            <source src="{{ asset('videos/webLoop June2025.mp4') }}" type="video/mp4">
+            {{-- Mensaje para navegadores que no soportan la etiqueta de video --}}
+            Your browser does not support the video tag.
+        </video>
+        {{-- FIN: VIDEO DE FONDO --}}
+
+        {{-- El overlay ahora se sentará sobre el video --}}
         <div class="hero-overlay"></div>
+
+        {{-- El contenido se mantiene igual, con un z-index para asegurar que esté al frente --}}
         <div class="container mx-auto px-6 relative z-10">
             <h1 class="text-5xl font-bold mb-4">{{ __('Bienvenid@') }}</h1>
             <p class="text-xl mb-8">{{ __('Mis prácticas') }}</p>
@@ -93,7 +112,8 @@
 @push('styles')
     <style>
         .hero-section {
-            background-image: url('https://images.unsplash.com/photo-1616530940355-351fabd9524b?ixlib=rb-4.0.3&auto=format&fit=crop&w=2069&q=80');
+            /* Ya no necesitamos la imagen de fondo aquí */
+            /* background-image: url('...'); */
             background-size: cover;
             background-position: center;
             height: 500px;
@@ -102,8 +122,25 @@
             justify-content: center;
             color: white;
             text-align: center;
-            position: relative;
+            position: relative; /* Se mantiene para posicionar los hijos (video, overlay) */
+            overflow: hidden; /* Importante para que el video no se desborde */
         }
+
+        /* INICIO: ESTILOS PARA EL VIDEO */
+        .hero-video {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%); /* Centra el video */
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            z-index: 0; /* Coloca el video en la capa más baja */
+            object-fit: cover; /* Asegura que el video cubra todo el espacio sin distorsionarse */
+        }
+        /* FIN: ESTILOS PARA EL VIDEO */
+
         .hero-overlay {
             background-color: rgba(0, 0, 0, 0.5);
             position: absolute;
@@ -111,15 +148,21 @@
             left: 0;
             width: 100%;
             height: 100%;
+            z-index: 1; /* El overlay va encima del video */
         }
+
+        /* Aseguramos que el contenido esté por encima del overlay,
+           tu 'relative z-10' en el div del container ya lo hace, pero esto es por claridad. */
+        .hero-section .container {
+            z-index: 2;
+        }
+
         .btn-primary {
             background-color: #4f46e5;
             color: white;
             padding: 12px 24px;
             border-radius: 8px;
             transition: background-color 0.3s ease-in-out;
-            /* Aplicar clases de Tailwind directamente también puede ser una opción aquí */
-            /* @apply bg-indigo-600 text-white py-3 px-6 rounded-lg hover:bg-indigo-700 transition duration-300; */
         }
         .btn-primary:hover {
             background-color: #4338ca;

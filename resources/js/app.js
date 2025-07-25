@@ -1,7 +1,10 @@
-import './bootstrap';
-import Alpine from 'alpinejs';
+import './bootstrap'
+import Alpine from 'alpinejs'
 
-window.Alpine = Alpine;
-Alpine.start();
+import './components/datetime.js'
+import phoneInput from './components/phoneInput'
 
-import './components/datetime.js';
+Alpine.data('phoneInput', phoneInput)
+
+window.Alpine = Alpine
+Alpine.start()

@@ -232,22 +232,25 @@ private function parseBoardingPass(): array|string|null
         }
 
         // Nombre
-        if (preg_match('/boleto electr[oó]nico por\s+([a-z\s\/]+?)\s+\d{1,2} \w+ \d{4}/i', $cleanText, $m)) {
-            $name = trim($m[1]);
-            $pasajero['nombre_original'] = ucwords(str_replace('/', ' / ', $name));
-            $parts = array_map('ucfirst', array_reverse(explode('/', $name)));
-            $pasajero['nombre_unificado'] = implode('', $parts);
+        if (preg_match('/boleto electr[oó]nico por\s*([a-záéíóúñ]{5,})([a-záéíóúñ]{5,})/iu', $cleanText, $m)) {
+            $nombre = $m[1] . ' ' . $m[2];
+            $pasajero['nombre_original'] = ucwords($nombre);
+            $pasajero['nombre_unificado'] = strtolower($m[1] . $m[2]);
+            Log::info('CopaParser: Nombre detectado (E-Ticket): ' . $pasajero['nombre_original']);
         }
 
+
         // Número de billete
-        if (preg_match('/n[uú]mero de boleto\s*.*?(\d{13})/i', $cleanText, $m)) {
+        if (preg_match('/(?:n[uú]mero de boleto|boleto electr[oó]nico).*?(\d{13})/iu', $cleanText, $m)) {
             $reserva['datos_adicionales']['numero_billete'] = substr($m[1], 0, 3) . '-' . substr($m[1], 3);
         }
 
+
         // Fecha de emisión
-        if (preg_match('/boleto electr[oó]nico por.*?(\d{1,2}\s+\w+\s+\d{4})/i', $cleanText, $m)) {
-            $reserva['datos_adicionales']['fecha_emision_billete'] = date('Y-m-d', strtotime($m[1]));
+        if (preg_match('/boleto electr[oó]nico por.*?(\d{1,2})\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})/iu', $cleanText, $m)) {
+            $reserva['datos_adicionales']['fecha_emision_billete'] = date('Y-m-d', strtotime("{$m[1]} {$m[2]} {$m[3]}"));
         }
+
 
         // Precio
         if (preg_match('/total\s+([\d\.]+)\s*usd/i', $cleanText, $m)) {

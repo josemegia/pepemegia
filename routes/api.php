@@ -6,7 +6,6 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Http;
-use App\Http\Controllers\Admin\TestPdfParserController;
 use App\Http\Controllers\Admin\StayController;
 use App\Http\Controllers\Admin\AirportController;
 use App\Models\Reserva;
@@ -54,7 +53,7 @@ Route::get('/verificar-afiliado/{codigo}', function (Request $request, $codigo) 
 });
 
 
-Route::prefix('admin')->name('api.admin.')->group(function () {
+Route::prefix('admin')->name('api.admin.')->middleware('auth:sanctum')->group(function () {
 
     Route::get('/timeline', [AirportController::class, 'timeline'])->name('timeline');
     Route::get('/exportar', [AirportController::class, 'exportar'])->name('exportar');
@@ -73,16 +72,3 @@ Route::prefix('admin')->name('api.admin.')->group(function () {
     });
 
 });
-/*
-    Route::prefix('api')->name('api.')->group(function () {
-        Route::prefix('airports')->name('airports.')->group(function () {
-            Route::post('update-references', [AirportController::class, 'updateReferences'])->name('update-references');
-            Route::get('get-country', [AirportController::class, 'getCountry'])->name('get-country');
-        });
-
-        Route::prefix('stays')->name('stays.')->group(function () {
-            Route::get('/', [StayController::class, 'getEstancias'])->name('get-estancias');
-            Route::get('/pasajeros', [StayController::class, 'getPasajeros'])->name('get-pasajeros');
-        });
-    });
-*/

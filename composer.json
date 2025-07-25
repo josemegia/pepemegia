@@ -7,6 +7,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.2",
+        "giggsey/libphonenumber-for-php": "^9.0",
         "google/apiclient": "^2.18",
         "google/cloud": "^0.290.0",
         "google/cloud-ai-platform": "*",
@@ -16,6 +17,7 @@
         "laravel/fortify": "1.27.0",
         "laravel/framework": "^12.0",
         "laravel/horizon": "^5.33",
+        "laravel/sanctum": "^4.2",
         "laravel/socialite": "^5.21",
         "laravel/tinker": "^2.10.1",
         "nesbot/carbon": "^3.9",

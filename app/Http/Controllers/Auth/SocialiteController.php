@@ -15,24 +15,39 @@ class SocialiteController extends Controller
     /**
      * Redirige al usuario al proveedor de OAuth.
      *
-     * @param string $provider El nombre del proveedor (ej. 'google', 'microsoft', 'twitter').
+     * @param string $provider El nombre del proveedor (ej. 'google', 'microsoft', 'twitter-oauth-2').
      * @return \Symfony\Component\HttpFoundation\RedirectResponse
      */
     public function redirectToProvider(string $provider)
     {
+        $allowedProviders = array_keys(config('socialite'));
+
+        // Seguridad: solo permitir proveedores conocidos
+        if (!in_array($provider, $allowedProviders)) {
+            abort(403, 'Proveedor no permitido');
+        }
+
+        // Seguridad: validar que la configuración del proveedor exista
+        if (!config("services.$provider")) {
+            return redirect('/login')->withErrors("No hay configuración válida para $provider.");
+        }
+
         try {
-            //return Socialite::driver($provider)->redirect();
-            
             $socialiteDriver = Socialite::driver($provider);
-            if ($provider === 'google') 
+
+            if ($provider === 'google') {
                 $socialiteDriver->scopes(config('services.google.scopes'))
                                 ->with([
                                     'access_type' => 'offline',
-                                    'prompt' => 'consent'
+                                    'prompt' => 'consent',
                                 ]);
+            }
+
             return $socialiteDriver->redirect();
-        } catch (Exception $e) {
-            return redirect('/login')->withErrors('No se pudo conectar con ' . ucfirst($provider) . '. Por favor, inténtalo de nuevo.');
+
+        } catch (\Exception $e) {
+            report($e); // Registra el error en laravel.log
+            return redirect('/login')->withErrors('No se pudo conectar con ' . ucfirst($provider) . '.');
         }
     }
 

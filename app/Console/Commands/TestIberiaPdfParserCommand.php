@@ -14,7 +14,7 @@ class TestIberiaPdfParserCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'test:pdf {--save : Whether to save the parsed data to DB (default: false)} {--pdf-path= : Custom PDF path in storage (overrides config)}';
+    protected $signature = 'test:iberia-parser {--save : Whether to save the parsed data to DB (default: false)} {--pdf-path= : Custom PDF path in storage (overrides config)}';
 
     /**
      * The console command description.

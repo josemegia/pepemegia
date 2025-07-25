@@ -40,7 +40,7 @@
 <div class="container mx-auto px-4 py-8 max-w-7xl" x-data="staysApp">
     <h1 class="text-3xl font-extrabold text-primary-700 mb-6 text-center">🌍 {{ __('admin.stays_by_country') }}</h1>
     <div class="flex flex-wrap justify-center gap-4 my-8 p-6 bg-white rounded-lg shadow-md">
-        <select x-model="pid" @change="filtrar()" class="p-2 rounded-lg border border-gray-300">
+        <select x-model="pid" @change="filtrar()" class="p-2 rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-white">
             <!-- Cargado dinámicamente en init -->
         </select>
 
@@ -97,8 +97,9 @@
 @endsection
 
 @push('scripts')
+
 <script>
-    function staysApp() {
+    function staysApp(config = {}) {
         return {
             pid: 1,
             desde: '',
@@ -108,6 +109,7 @@
             loading: false,
             error: null,
             base: window.location.origin,
+            daysText: config.daysText || 'días',
             colores: ['#0072ff', '#00b894', '#ff7675', '#fdcb6e', '#6c5ce7', '#e84393', '#55efc4', '#2d3436'],
 
             async init() {
@@ -135,11 +137,20 @@
 
             getResumenHtml() {
                 return this.estancias.map((e, i) => `
-                    <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 w-52 shadow-lg text-center" style="border-top: 5px solid ${this.colores[i % this.colores.length]}">
-                        <h3 class="text-lg font-semibold text-gray-800 mb-1">${e.pais}</h3>
-                        <div class="text-xl font-bold text-primary-600 mb-1">${e.dias} {{ __('admin.days') }}</div>
-                        <div class="text-sm text-gray-600">${this.formatFecha(e.desde)} - ${this.formatFecha(e.hasta)}</div>
-                        ${e.nota ? `<div class="text-sm text-red-500 mt-1">(${e.nota})</div>` : ''}
+                    <div class="bg-blue-50 dark:bg-gray-800 border border-blue-200 dark:border-gray-700 rounded-xl p-5 w-52 shadow-lg text-center"
+                         style="border-top: 5px solid ${this.colores[i % this.colores.length]}">
+
+                        <h3 class="text-lg font-semibold text-gray-800 dark:text-white mb-1">${e.pais}</h3>
+
+                        <div class="text-xl font-bold text-primary-600 dark:text-primary-400 mb-1">
+                            ${e.dias} ${this.daysText}
+                        </div>
+
+                        <div class="text-sm text-gray-600 dark:text-gray-300">
+                            ${this.formatFecha(e.desde)} - ${this.formatFecha(e.hasta)}
+                        </div>
+
+                        ${e.nota ? `<div class="text-sm text-red-500 dark:text-red-400 mt-1">(${e.nota})</div>` : ''}
                     </div>
                 `).join('');
             },
@@ -155,7 +166,6 @@
                     return acc;
                 }, {});
 
-                // Agrupar en segmentos continuos por país
                 const segmentos = [];
                 let current = null;
                 this.bloques.sort((a, b) => new Date(a.desde) - new Date(b.desde)).forEach(b => {
@@ -173,7 +183,7 @@
                     const div = document.createElement('div');
                     div.className = 'day-block min-w-[40px] p-2 text-center border-r border-gray-300 text-white flex-shrink-0';
                     div.style.backgroundColor = mapaColor[s.pais];
-                    div.style.width = `${dias * 40}px`; // Proporcional para visualizar duración
+                    div.style.width = `${dias * 40}px`;
                     div.innerHTML = `<div class="text-xs">${this.formatFecha(s.desde)} - ${this.formatFecha(s.hasta)}</div><div class="font-medium">${s.pais}</div>`;
                     timeline.appendChild(div);
                 });
@@ -234,4 +244,5 @@
         };
     }
 </script>
+
 @endpush

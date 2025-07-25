@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 use App\Models\Reserva;
+use App\Models\User;
 use App\Models\Pasajero;
 use App\Models\IsoCountryCode;
 
@@ -38,9 +39,31 @@ class StayController extends Controller
 
     public function pasajeros()
     {
-        return Pasajero::orderBy('nombre_unificado')
-            ->select('id', 'nombre_unificado')
-            ->get();
+        // 1) Get all emails and names of users with role admin
+        $adminUsers = User::where('role', 'admin')
+                        ->select('email', 'name')
+                        ->get()
+                        ->mapWithKeys(function ($user) {
+                            return [$user->email => $user->name];
+                        })
+                        ->toArray();
+
+        $adminEmails = array_keys($adminUsers);
+        $adminNames = array_values($adminUsers);
+
+        // 2) Return only passengers who have bookings from admin emails
+        // and whose 'variantes' JSON array contains the admin's name
+        return Pasajero::whereHas('reservas', function($q) use ($adminEmails) {
+                    $q->whereIn('email_origen', $adminEmails);
+                })
+                ->where(function ($query) use ($adminNames) {
+                    foreach ($adminNames as $name) {
+                        $query->orWhereJsonContains('variantes', $name);
+                    }
+                })
+                ->orderBy('nombre_unificado')
+                ->select('id', 'nombre_unificado')
+                ->get();
     }
 
     public function cronograma(Request $request)
