@@ -4,6 +4,15 @@
 
 return [
     'items' => [
+        [
+            'label'   => 'Mi Bóveda',
+            'url'     => '/admin/iframe?url=https://vault.pepemegia.com',
+            'title'   => 'Acceder a mi bóveda de contraseñas',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-key'],
+                ['type' => 'text', 'value' => 'Mi Bóveda'],
+            ],
+        ],
         // --- Menú de Perfil de Usuario (para cualquier usuario autenticado) ---
         [
             'label'   => 'menu.profile_label',

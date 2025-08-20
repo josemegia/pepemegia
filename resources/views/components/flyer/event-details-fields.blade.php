@@ -1,9 +1,17 @@
-@props(['data' => [], 'regions' => [], 'region' => 'CO'])
+@props(['data' => [], 'regions' => [], 'presetlinks' => [], 'region' => 'CO'])
 
 <fieldset class="border-t border-gray-700 pt-4" id="eventDetailsFields">
     <legend class="text-xl font-semibold text-white px-2">Detalles del Evento</legend>
-    <div class="space-y-4 mt-2">
+    
+    <div 
+        class="space-y-4 mt-2"
+        x-data="eventDetailsHandler()"
+        x-init="init()"
+        @input.debounce.500ms="updateOptions()"
+        x-cloak
+    >
 
+        {{-- Fecha y hora --}}
         <x-flyer.datetime-picker 
             date-name="event_date" 
             time-name="event_time" 
@@ -11,6 +19,7 @@
             :time-value="$data['event']['time'] ?? ''"
         />
 
+        {{-- Teléfono --}}
         <div 
             x-data="phoneInput()" 
             x-init="
@@ -20,12 +29,11 @@
             "
             x-cloak
         >
-            <label for="event_phone" class="block mb-2 text-sm font-medium text-gray-300">Número de Teléfono (Opcional)<img 
-                :src="`/flags/${countryCode.toLowerCase()}.svg`" 
-                :alt="countryCode" 
-                class="rigth w-6 h-4 rounded shadow"
-            /></label>
-            
+            <label for="event_phone" class="block mb-2 text-sm font-medium text-gray-300">
+                Número de Teléfono (Opcional)
+                <img :src="`/flags/${countryCode.toLowerCase()}.svg`" :alt="countryCode" class="inline-block w-6 h-4 ml-2 rounded shadow" />
+            </label>
+
             <div class="flex items-center">
                 <div class="relative">
                     <select 
@@ -57,6 +65,7 @@
             @enderror
         </div>
 
+        {{-- Plataforma --}}
         <div>
             <label for="event_platform" class="block mb-2 text-sm font-medium text-gray-300">Plataforma (Zoom o Ciudad)</label>
             <input type="text" name="event_platform" id="event_platform"
@@ -66,6 +75,8 @@
                 <span class="text-red-500 text-sm">{{ $message }}</span>
             @enderror
         </div>
+
+        {{-- Detalles --}}
         <div>
             <label for="event_platform_details" class="block mb-2 text-sm font-medium text-gray-300">Detalles (ID de zoom, dirección)</label>
             <input type="text" name="event_platform_details" id="event_platform_details"
@@ -75,15 +86,40 @@
                 <span class="text-red-500 text-sm">{{ $message }}</span>
             @enderror
         </div>
+
+        {{-- Enlace de acción --}}
         <div>
-            <label for="cta_link" class="block mb-2 text-sm font-medium text-gray-300">Enlace de Acción (Zoom, Maps, etc.)</label>
-            <input type="url" name="cta_link" id="cta_link"
+            <label for="cta_link" class="flex items-center justify-between mb-2 text-sm font-medium text-gray-300">
+                <span>Enlace de Acción (Zoom, Maps, etc.)</span>
+<select 
+    class="text-gray-900 text-sm bg-white border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500 p-1"
+    @change="buildPresetLink($event.target.value)"
+    x-ref="presetSelect"
+>
+    <option value="">Usar plantilla rápida</option>
+
+    <template x-if="showWhatsapp">
+        <option value="whatsapp">Enviar por WhatsApp</option>
+    </template>
+
+    <template x-if="showMaps">
+        <option value="maps">Abrir en Google Maps</option>
+    </template>
+
+    <template x-if="showZoom">
+        <option value="zoom">Unirse a Zoom</option>
+    </template>
+</select>
+
+            </label>
+
+            <input type="url" name="cta_link" id="cta_link" x-model="ctaLink"
                 class="bg-gray-700 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                value="{{ old('cta_link', $data['cta']['link'] ?? '') }}" required>
+                required>
             @error('cta_link')
                 <span class="text-red-500 text-sm">{{ $message }}</span>
             @enderror
         </div>
-        
+
     </div>
 </fieldset>

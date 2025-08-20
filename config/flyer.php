@@ -3,30 +3,45 @@
 return [
 
     // --- DATOS GENERALES DEL EVENTO ---
-    'presenters' => 'SOCIAL ECONOMIC NETWORKERS',
-    'mainTitle' => 'TRANSFORMA TU FUTURO',
-    'subtitle' => 'Invitación a Oportunidad de Negocio',
+    'presenters' => '',
+    'mainTitle' => 'Planifica tu Futuro',
+    'subtitle' => 'Una oportunidad real',
 
     'event' => [
-        'date' => 'Viernes, 27 de Junio',
-        'time' => '8 PM (Hora Ecuador)',
-        'platform' => 'Vía Zoom 9513664473',
+        'date' => 'Viernes, 5 de agosto',
+        'time' => '9 PM (Hora España)',
+        'platform' => 'Vía Zoom 94697349280',
         'platform_details' => 'Clave: SEN',
     ],
 
     'speaker' => [
         'name' => 'Claudia Martínez',
-        'title' => 'Oradora Especial',
-        'quote' => 'Una líder con la visión y experiencia para guiarte hacia el éxito',
+        'title' => 'Experiencia y Resultados',
+        'quote' => 'En tiempos de cambio, adaptarnos es una responsabilidad',
         'image' => 'claudia.png',
     ],
 
     'cta' => [
         'button_text' => '¡QUIERO PARTICIPAR!',
-        'link' => 'https://zoom.us/j/9513664473',
-        'footer_text' => 'Un evento que puede cambiar tu perspectiva',
+        'link' => 'https://api.whatsapp.com/send?phone=34649411279&text=*Hola*%2C%0A_Deseo%20asistir_%3A%0A%3E%20%F0%9F%93%8D%20https%3A%2F%2Fzoom.us%2Fj%2F94697349280%3Fpwd%3Dr3xBOgCC7FIu7jn3V2gFRVQ4C8XA87.1%0A*Gracias*.%0A%F0%9F%98%8A',
+        'footer_text' => 'SOCIAL ECONOMIC NETWORKERS',
     ],
-    
+
+    'links' => [
+        'zoom' => [
+            'label' => 'Entrar en una sala de Zoom',
+            'description' => 'Genera un enlace de Zoom',
+        ],
+        'whatsapp' => [
+            'label' => 'Enviar un WhatsApp',
+            'description' => 'Abre WhatsApp con un mensaje personalizado',
+        ],
+        'maps' => [
+            'label' => 'Enviar a Google Maps',
+            'description' => 'Abre Google Maps en una dirección concreta',
+        ],
+    ],
+
     // --- CONTROL DE EXPIRACIÓN Y LÍMITE ---
     'max_flyers_per_user' => 20,         // Máximo flyers por usuario
     'flyer_expiration_days' => 7,        // Días de vida de cada flyer compartido

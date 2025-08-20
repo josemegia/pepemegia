@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\ShortUrl;
 use Illuminate\Http\Request;
+use App\Services\ZoomMeetingService;
+
 
 class ShortUrlController extends Controller
 {
@@ -12,13 +14,56 @@ class ShortUrlController extends Controller
      */
     public function show(string $code)
     {
-        // Busca la URL corta por el código. Si no la encuentra, devuelve un error 404.
+        // Busca la URL corta por el código
         $shortUrl = ShortUrl::where('short_code', $code)->firstOrFail();
 
-        // Opcional: Incrementa el contador de clics cada vez que se usa el enlace corto.
+        // Incrementa el contador de clics
         $shortUrl->increment('clicks');
 
-        // Redirige al usuario a la URL larga.
-        return redirect($shortUrl->long_url);
+        // Verifica si la URL apunta a un flyer JSON que requiere programación Zoom
+        $url = $shortUrl->long_url;
+        /*
+        if ($this->isFlyerJsonUrl($url)) {
+            try {
+                $joinUrl = $zoomService->createFromFlyerJson($url);
+                return redirect($joinUrl);
+            } catch (\Exception $e) {
+                abort(500, 'Error procesando flyer Zoom: ' . $e->getMessage());
+            }
+        }*/
+
+        // Si no es flyer válido, redirige directamente
+        return redirect($url);
+    }
+
+    public function zoom(string $code, ZoomMeetingService $zoomService)
+    {
+        // Busca la URL corta por el código
+        $shortUrl = ShortUrl::where('short_code', $code)->firstOrFail();
+
+        // Incrementa el contador de clics
+        $shortUrl->increment('clicks');
+
+        // Verifica si la URL apunta a un flyer JSON que requiere programación Zoom
+        $url = $shortUrl->long_url;
+        
+        if ($this->isFlyerJsonUrl($url)) {
+            try {
+                $joinUrl = $zoomService->createFromFlyerJson($url);
+                return redirect($joinUrl);
+            } catch (\Exception $e) {
+                abort(500, 'Error procesando flyer Zoom: ' . $e->getMessage());
+            }
+        }
+
+        // Si no es flyer válido, redirige directamente
+        return redirect($url);
+    }
+    /**
+     * Determina si la URL es un flyer válido que contiene JSON procesable
+     */
+    private function isFlyerJsonUrl(string $url): bool
+    {
+        return str_contains($url, '/flyer/view/') && str_ends_with($url, '.json');
     }
 }

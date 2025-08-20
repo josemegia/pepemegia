@@ -6,6 +6,18 @@
     
     <title>{{ __('presentation.titulo_pagina') }}</title>
 
+    <meta property="og:title" content="Presentación">
+    <meta property="og:description" content="Actualización Financiera">
+    
+    {{-- La URL completa de la imagen de vista previa. `asset()` lo hace por ti. --}}
+    <meta property="og:image" content="{{ asset('storage/icons/plan/icon-512x512.png') }}">
+    
+    {{-- La URL canónica de la página que estás compartiendo. --}}
+    <meta property="og:url" content="{{ url()->current() }}">
+    <meta property="og:type" content="website">
+
+
+
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     
     <link rel="manifest" href="{{ asset('plan-manifest.json') }}">

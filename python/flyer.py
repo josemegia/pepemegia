@@ -1,7 +1,10 @@
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import sys
+import locale
 from datetime import datetime
 import os
+
+locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 
 def log(msg, level="INFO"):
     """
@@ -106,6 +109,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     url = sys.argv[1]
+    
     output_path = sys.argv[2]
     device_name = sys.argv[3]
     browser_type = sys.argv[4] if len(sys.argv) == 5 else "chromium" # Valor por defecto

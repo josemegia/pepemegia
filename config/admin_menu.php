@@ -4,6 +4,16 @@
 return [
     'items' => [
         [
+            'label'   => 'Vault Admin',
+            'url'     => '/admin/iframe?url=https://vault.pepemegia.com/admin',
+            'can'     => 'access-vault-admin',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-lock'],
+                ['type' => 'text', 'value' => 'Vault Admin'],
+            ],
+            'title' => 'Acceder al panel de administración de Vaultwarden',
+        ],
+        [
             'label'   => 'menu.dashboard',
             'route'   => 'admin.dashboard',
             'can'     => 'view-admin-dashboard',

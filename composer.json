@@ -8,6 +8,7 @@
     "require": {
         "php": "^8.2",
         "giggsey/libphonenumber-for-php": "^9.0",
+        "google-gemini-php/laravel": "^2.0",
         "google/apiclient": "^2.18",
         "google/cloud": "^0.290.0",
         "google/cloud-ai-platform": "*",

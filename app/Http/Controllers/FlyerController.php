@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\{
+    Auth,
     Session,
     Storage,
     File,
@@ -158,6 +159,7 @@ class FlyerController extends Controller
             'current_format_name' => null,
             'regions' => $regions,
             'defaultregion' => $defaultregion,
+            'presetlinks' => config('flyer.links',[]),
         ]);
     }
 
@@ -366,6 +368,9 @@ class FlyerController extends Controller
                 'footer_text' => config('flyer.cta.footer_text'),
             ],
         ];
+        if (auth()->check()) {
+            $dataToSave['email'] = auth()->user()->email;
+        }
 
         // Guardar los datos actualizados en el archivo JSON principal
         $this->saveFlyerData($dataToSave);
@@ -396,7 +401,34 @@ class FlyerController extends Controller
                 'filename' => $filename
             ]);
 
-            $sharedLink = $this->shortener->generate($longSharedLink);
+            $sharedLink = $this->shortener->generate($longSharedLink).'?lang='.config('app.iso2');
+
+            // Si el enlace contiene 'pending', actualizar el JSON compartido con el short code extraído
+            if (strpos($dataToSave['cta']['link'], 'pending') !== false) {
+                $newZoomLink = str_replace('/u/', '/j/', $sharedLink);
+
+                $pendingRaw = 'https://zoom.us/j/pending';
+                $pendingEncoded = urlencode($pendingRaw);
+
+                $updatedLink = $dataToSave['cta']['link'];
+
+                // Caso directo (no codificado)
+                if (strpos($updatedLink, $pendingRaw) !== false) {
+                    $updatedLink = str_replace($pendingRaw, $newZoomLink, $updatedLink);
+                }
+                // Caso WhatsApp (codificado)
+                else if (strpos($updatedLink, $pendingEncoded) !== false) {
+                    $updatedLink = str_replace($pendingEncoded, urlencode($newZoomLink), $updatedLink);
+                }
+
+                // Actualizar el JSON compartido
+                $sharedFullPath = "flyers/shared/{$uuid}/{$filename}";
+                $jsonData = Storage::disk('public')->get($sharedFullPath);
+                $sharedData = json_decode($jsonData, true);
+                $sharedData['cta']['link'] = $updatedLink;
+                Storage::disk('public')->put($sharedFullPath, json_encode($sharedData, JSON_PRETTY_PRINT));
+                Log::info("Updated shared flyer with Zoom link: " . $updatedLink);
+            }
 
             Log::info('Shared link generated: ' . $sharedLink);
                 

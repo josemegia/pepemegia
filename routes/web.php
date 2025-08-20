@@ -13,6 +13,7 @@ use App\Http\Controllers\ShortUrlController;
 use App\Http\Controllers\GoogleAuthController;
 use App\Http\Controllers\PresentacionController;
 use App\Http\Controllers\VentasController;
+use App\Http\Controllers\IframeController;
 use App\Http\Controllers\Auth\SocialiteController;
 use App\Http\Controllers\Auth\ProfileController;
 use App\Http\Controllers\Admin\AdminUsersController;
@@ -25,7 +26,8 @@ Route::view('/', 'inicio')->name('inicio');
 Route::view('/privacidad', 'privacidad')->name('privacidad');
 
 // URL corta
-Route::get('/j/{code}', [ShortUrlController::class, 'show'])->name('shorturl.show');
+Route::get('/u/{code}', [ShortUrlController::class, 'show'])->name('shorturl.show');
+Route::get('/j/{code}', [ShortUrlController::class, 'zoom'])->name('shorturl.zoom');
 
 // Socialite auth
 Route::prefix('auth')->name('socialite.')->group(function () {
@@ -43,16 +45,15 @@ Route::prefix('plan')->name('plan.')->group(function () {
     })->name('index');
     Route::get('/presentacion/{dia}', [PresentacionController::class, 'show'])->name('show');
 
-// Plan/ventas
-    Route::prefix('ventas')->name('ventas.')->group(function () {
-        Route::get('/', function (Request $request) {
-            return redirect()->route('plan.ventas.show', [
-                'dia' => 1,
-                'divisa' => strtolower(config('app.iso2'))
-            ]);
-        })->name('index');
-        Route::get('/presentacion/{dia}', [VentasController::class, 'show'])->name('show');
-    });
+});
+
+// Ventas
+Route::prefix('ventas')->name('ventas.')->group(function () {
+    Route::get('/', [VentasController::class, 'presentacion'])->name('index');
+
+    Route::get('/form', [VentasController::class, 'form'])->name('form');
+    Route::post('/form', [VentasController::class, 'storeOrUpdate'])->name('storeOrUpdate');
+
 });
 
 
@@ -91,6 +92,7 @@ Route::middleware('auth')->group(function () {
     });
     // Admin
     Route::middleware('admin')->prefix('admin')->name('admin.')->group(function () {
+        Route::get('iframe', [IframeController::class, 'show'])->name('iframe');
         Route::resource('users', AdminUsersController::class);
         Route::view('/dashboard', 'admin.dashboard')->name('dashboard');
         Route::prefix('recaptcha')->name('recaptcha.')->group(function () {
@@ -118,7 +120,9 @@ Route::middleware('auth')->group(function () {
     });
 });
 
-Route::fallback(function (Request $request, ShortUrlService $shortUrlService) {
-    $path = ltrim($request->path(), '/');
-    return $shortUrlService->handleFallback($path);
-});
+Route::fallback(
+    function (Request $request, ShortUrlService $shortUrlService) {
+        $path = ltrim($request->path(), '/');
+        return $shortUrlService->handleFallback($path);
+    }
+);

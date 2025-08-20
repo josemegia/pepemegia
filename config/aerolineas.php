@@ -201,12 +201,51 @@ return [
     ],
 
     'copa_airlines' => [
-        'friendly_name'   => 'Copa',
-        'function'        => true,
-        'senders'         => ['noreply@css.copaair.com', 'e-ticket@copaair.com', 'pedro4life09@yahoo.com', 'noreply@selfcheckin.copaair.com', 'upgrades@copaair.com' /* ...otros... */],
-        'domains'         => ['copaair.com', 'copa.com', 'css.copaair.com'],
-        'gmail_query_tags'=> ['subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass" OR "Pase de Abordar") from:(copaair.com OR css.copaair.com OR copa.com OR pedro4life09@yahoo.com) has:attachment filename:pdf'],
-        'specific_keywords'=> ['Record Locator:', 'Número de reserva:', 'Purchase Receipt', 'EMD']
+        'friendly_name' => 'Copa',
+        'function'      => true,
+
+        'senders' => [
+            'call_center_services@css.copaair.com',
+            'noreply@css.copaair.com',
+            'e-ticket@copaair.com',
+            'noreply@selfcheckin.copaair.com',
+            'upgrades@copaair.com',
+            'pedro4life09@yahoo.com',
+        ],
+
+        // Añadimos también el relay y el subdominio del self-checkin
+        'domains' => [
+            'css.copaair.com',
+            'copaair.com',
+            'copa.com',
+            'selfcheckin.copaair.com',
+            'entsvcs.com',
+        ],
+
+        // Estas queries se fusionan con las genéricas del servicio
+        'gmail_query_tags' => [
+            // 🔥 Caso real tuyo (SIN has:attachment por si Gmail no indexa bien el adjunto)
+            'from:call_center_services@css.copaair.com subject:("recibo y confirmación de boleto" OR "confirmacion de boleto")',
+
+            // Recibo/confirmación con adjunto PDF (cuando Gmail sí lo detecta)
+            'subject:("recibo y confirmación de boleto" OR "confirmacion de boleto" OR "e-ticket receipt") from:(css.copaair.com OR copaair.com OR copa.com OR entsvcs.com OR call_center_services@css.copaair.com) has:attachment filename:pdf',
+
+            // Pases de abordar
+            'subject:("pase de abordar" OR "pases de abordar" OR "boarding pass") from:(selfcheckin.copaair.com OR noreply@selfcheckin.copaair.com OR css.copaair.com OR copaair.com OR copa.com) has:attachment filename:pdf',
+
+            // Itinerario / e-ticket
+            'subject:("itinerario" OR "itinerario de viaje" OR "e-ticket" OR "eticket" OR "confirmación de vuelo" OR "reserva de vuelo") from:(css.copaair.com OR copaair.com OR e-ticket@copaair.com OR copa.com) has:attachment filename:pdf',
+        ],
+
+        'specific_keywords' => [
+            'Record Locator:',
+            'Número de reserva:',
+            'Purchase Receipt',
+            'EMD',
+            'Recibo y confirmación de boleto',
+            'Confirmación de boleto',
+            'Pase de Abordar',
+        ],
     ],
 
     'croatia_airlines' => [

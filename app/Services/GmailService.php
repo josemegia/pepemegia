@@ -80,185 +80,80 @@ class GmailService
 
     /**
      * Construye queries de Gmail más específicas para aerolíneas.
+     * MIN-CAMBIO: añade `in:anywhere` y cubre asuntos típicos (recibo/boarding pass/itinerario),
+     * y contempla el dominio relay `entsvcs.com`.
      */
     private function getAirlineSpecificQueries(string $fechaInicio): array
     {
         $airlineQueries = [];
+
+        // Palabras clave ya configuradas globalmente
         $subjectKeywords = implode(' OR ', $this->airlineKeywords);
         $genericKeywords = implode(' OR ', $this->defaultKeywords);
 
-        // Query 1: De dominios de aerolíneas conocidos con palabras clave de aerolíneas en el asunto
-        $fromDomains = implode(' OR ', array_map(function($domain) { return "from:{$domain}"; }, $this->airlineDomains));
+        // Incluimos explícitamente entsvcs.com (relay que aparece en copias de Copa)
+        $fromDomainList = $this->airlineDomains ?: [];
+        $fromDomainList[] = 'entsvcs.com';
+        $fromDomainList = array_values(array_unique($fromDomainList));
+
+        $fromDomains = implode(' OR ', array_map(fn($domain) => "from:{$domain}", $fromDomainList));
+
+        // Q0: remitentes de aerolíneas conocidos + keywords de aerolíneas
         if (!empty($fromDomains)) {
-            $airlineQueries[] = "({$fromDomains}) subject:({$subjectKeywords}) after:{$fechaInicio}";
+            $airlineQueries[] = "in:anywhere ({$fromDomains}) subject:({$subjectKeywords}) after:{$fechaInicio}";
         }
 
-        // Query 2: Asuntos muy específicos de vuelos
-        $airlineQueries[] = 'subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass") after:' . $fechaInicio;
-        
-        // Query 3: Palabras clave genéricas pero con "vuelo" o "aerolínea" en el cuerpo o asunto para más cobertura
-        $airlineQueries[] = "(\"vuelo\" OR \"aerolínea\" OR \"flight\" OR \"airline\" OR \"PNR\") subject:({$genericKeywords}) after:{$fechaInicio}";
+        // Q1: recibo / confirmación de boleto (Copa) + adjunto PDF
+        $airlineQueries[] =
+            'in:anywhere subject:("recibo y confirmación de boleto" OR "confirmacion de boleto" OR "e-ticket receipt") ' .
+            'has:attachment filename:pdf after:' . $fechaInicio;
+
+        // Q2: pases de abordar + adjunto PDF
+        $airlineQueries[] =
+            'in:anywhere subject:("pase de abordar" OR "pases de abordar" OR "boarding pass") ' .
+            'has:attachment filename:pdf after:' . $fechaInicio;
+
+        // Q3: itinerarios / reservas + adjunto PDF
+        $airlineQueries[] =
+            'in:anywhere subject:("itinerario" OR "itinerario de viaje" OR "reserva de vuelo" OR "flight booking" OR "confirmación de vuelo") ' .
+            'has:attachment filename:pdf after:' . $fechaInicio;
+
+        // Q4: fallback genérico con palabras de vuelo en cuerpo/asunto + tus keywords genéricas en asunto
+        $airlineQueries[] =
+            'in:anywhere ("vuelo" OR "aerolínea" OR "flight" OR "airline" OR "PNR") subject:(' . $genericKeywords . ') after:' . $fechaInicio;
 
         return $airlineQueries;
     }
 
-
-    public function getReservationEmails($months = 6, $specificType = null) // Añadido $specificType
+    public function getReservationEmails($months = 6, $specificType = null)
     {
         $this->authenticate();
         $fechaInicio = Carbon::now()->subMonths($months)->format('Y/m/d');
-        $queries = [];
+        $dateRange = $this->makeDateRange($fechaInicio, null);
 
-        if ($specificType === 'airline' || $specificType === null) { // Si se piden aerolíneas o todos
-             $queries = array_merge($queries, $this->getAirlineSpecificQueries($fechaInicio));
-        }
-        
-        // Aquí podrías añadir lógica para otros tipos si $specificType lo indica
-        // if ($specificType === 'hotel' || $specificType === null) { ... }
+        $queries = $this->composeQueries($dateRange, $specificType);
+        $emails  = $this->runQueries($queries);
 
-        if (empty($queries)) { // Si no se especificó un tipo válido o no hay queries
-             Log::warning("No se generaron queries para getReservationEmails con tipo: {$specificType}");
-             // Query genérica si no se especifica tipo o si se quieren todos los tipos (si no se ha añadido ya)
-            if($specificType === null && !in_array('subject:('.implode(' OR ', $this->queriesConfig['default_keywords']).') after:' . $fechaInicio, $queries) ){
-                 $queries[] = 'subject:('.implode(' OR ', $this->queriesConfig['default_keywords']).') after:' . $fechaInicio;
-            }
-        }
-        
-        // El resto del método (bucles, paginación, extracción de contenido) se mantiene igual
-        // que la versión robusta anterior que te proporcioné, asegurándose de devolver:
-        // ['id' => ..., 'content' => ['subject'=>..., 'body'=>..., 'from'=>...], 'email_origen' => ...]
-        // ... (código de bucle y extracción omitido por brevedad, usar el de la respuesta anterior) ...
-        $emailsOutput = [];
-        $processedMessageIds = [];
-
-        foreach ($queries as $query) {
-            try {
-                Log::debug("Ejecutando query para {$this->email} (tipo: {$specificType}): {$query}");
-                $optParams = [
-                    'q' => $query,
-                    'maxResults' => 50 
-                ];
-                
-                $pageToken = null;
-                do {
-                    if ($pageToken) {
-                        $optParams['pageToken'] = $pageToken;
-                    }
-                    $response = $this->service->users_messages->listUsersMessages('me', $optParams);
-
-                    if ($response->getMessages()) {
-                        foreach ($response->getMessages() as $message) {
-                            $messageId = $message->getId();
-                            if (in_array($messageId, $processedMessageIds)) {
-                                continue;
-                            }
-                            $processedMessageIds[] = $messageId;
-
-                            try {
-                                $fullMessage = $this->service->users_messages->get('me', $messageId, ['format' => 'FULL']);
-                                $extractedContentArray = $this->extractEmailContent($fullMessage);
-                                $emailsOutput[] = [
-                                    'id' => $messageId,
-                                    'content' => $extractedContentArray,
-                                    'email_origen' => $this->email
-                                ];
-                            } catch (\Exception $e) {
-                                Log::error("Error obteniendo o procesando mensaje completo ID {$messageId} para {$this->email}: " . $e->getMessage());
-                            }
-                        }
-                    }
-                    $pageToken = $response->getNextPageToken();
-                } while ($pageToken);
-
-            } catch (\Google\Service\Exception $e) {
-                $errorDetails = json_decode($e->getMessage(), true);
-                Log::error("Error de Google API para query '{$query}' / {$this->email}: " . ($errorDetails['error']['message'] ?? $e->getMessage()));
-                if ($e->getCode() == 401 || $e->getCode() == 403) throw $e;
-            } catch (\Exception $e) {
-                Log::error("Error general para query '{$query}' / {$this->email}: " . $e->getMessage());
-            }
-        }
-        Log::info(count($emailsOutput) . " emails únicos encontrados y pre-procesados para {$this->email} (tipo: {$specificType}).");
-        return $emailsOutput;
+        \Log::info(count($emails) . " emails únicos encontrados y pre-procesados para {$this->email} (tipo: {$specificType}).");
+        return $emails;
     }
 
     public function getReservationEmailsDesde(
         Carbon $desde,
         ?Carbon $hasta = null,
-        string $tipo = 'airline')
-
-    {
+        string $tipo = 'airline'
+    ) {
         $this->authenticate();
 
         $fechaInicio = $desde->format('Y/m/d');
-        $fechaFin = $hasta ? $hasta->addDay()->format('Y/m/d') : null; // Gmail excluye el día exacto en 'before:'
+        $fechaFin    = $hasta ? $hasta->copy()->addDay()->format('Y/m/d') : null; // before: exclusivo
+        $dateRange   = $this->makeDateRange($fechaInicio, $fechaFin);
 
-        $queries = [];
+        $queries = $this->composeQueries($dateRange, $tipo);
+        $emails  = $this->runQueries($queries);
 
-        $subjectKeywords = implode(' OR ', $this->airlineKeywords);
-        $genericKeywords = implode(' OR ', $this->defaultKeywords);
-        $fromDomains = implode(' OR ', array_map(fn($domain) => "from:{$domain}", $this->airlineDomains));
-
-        if ($tipo === 'airline' || $tipo === null) {
-            if (!empty($fromDomains)) {
-                $queries[] = "({$fromDomains}) subject:({$subjectKeywords}) after:{$fechaInicio}" . ($fechaFin ? " before:{$fechaFin}" : '');
-            }
-
-            //$queries[] = 'subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass") after:' . $fechaInicio . ($fechaFin ? " before:{$fechaFin}" : '');
-// AHORA (en getReservationEmailsDesde):
-            $queries[] = 'subject:("reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "e-ticket receipt" OR "itinerario de viaje" OR "boarding pass" OR "Pase de Abordar") after:' . $fechaInicio . ($fechaFin ? " before:{$fechaFin}" : '');
-            $queries[] = "(\"vuelo\" OR \"aerolínea\" OR \"flight\" OR \"airline\" OR \"PNR\") subject:({$genericKeywords}) after:{$fechaInicio}" . ($fechaFin ? " before:{$fechaFin}" : '');
-        }
-
-
-        // Lógica de búsqueda igual que en getReservationEmails()
-        $emailsOutput = [];
-        $processedMessageIds = [];
-
-        foreach ($queries as $query) {
-            try {
-                Log::debug("Ejecutando query para {$this->email} (tipo: {$tipo}): {$query}");
-                $optParams = ['q' => $query, 'maxResults' => 50];
-                $pageToken = null;
-
-                do {
-                    if ($pageToken) {
-                        $optParams['pageToken'] = $pageToken;
-                    }
-
-                    $response = $this->service->users_messages->listUsersMessages('me', $optParams);
-
-                    if ($response->getMessages()) {
-                        foreach ($response->getMessages() as $message) {
-                            $messageId = $message->getId();
-                            if (in_array($messageId, $processedMessageIds)) continue;
-                            $processedMessageIds[] = $messageId;
-
-                            try {
-                                $fullMessage = $this->service->users_messages->get('me', $messageId, ['format' => 'FULL']);
-                                $extractedContentArray = $this->extractEmailContent($fullMessage);
-                                $emailsOutput[] = [
-                                    'id' => $messageId,
-                                    'content' => $extractedContentArray,
-                                    'email_origen' => $this->email,
-                                ];
-                            } catch (\Exception $e) {
-                                Log::error("Error procesando mensaje ID {$messageId}: " . $e->getMessage());
-                            }
-                        }
-                    }
-
-                    $pageToken = $response->getNextPageToken();
-
-                } while ($pageToken);
-
-            } catch (\Exception $e) {
-                Log::error("Error en query '{$query}' / {$this->email}: " . $e->getMessage());
-            }
-        }
-
-        Log::info(count($emailsOutput) . " emails únicos encontrados desde {$fechaInicio} para {$this->email}.");
-        return $emailsOutput;
+        \Log::info(count($emails) . " emails únicos encontrados desde {$fechaInicio} para {$this->email}.");
+        return $emails;
     }
 
     /**
@@ -318,7 +213,7 @@ class GmailService
     /**
      * Recorre todas las partes (y sub-partes) para:
      * 1. Hallar el cuerpo principal
-     * 2. Detectar y extraer PDFs (adjuntos o inline)
+     * 2. Detectar y extraer PDFs (adjuntos o inline) con validaciones reales
      * 3. Seguir bajando recursivamente
      * @param Gmail\MessagePart[] $parts
      * @param array $emailData
@@ -327,16 +222,16 @@ class GmailService
     private function processPartsRecursive(array $parts, array &$emailData, string $messageId): void
     {
         foreach ($parts as $part) {
-            $mimeType = $part->getMimeType() ?? 'desconocido';
-            $filename = $part->getFilename() ?? '';
-            $body     = $part->getBody();
+            $mimeType     = $part->getMimeType() ?? 'desconocido';
+            $filename     = $part->getFilename() ?? '';
+            $body         = $part->getBody();
             $attachmentId = $body?->getAttachmentId();
 
             Log::debug("🔎 Analizando parte MIME en mensaje {$messageId}", [
-                'mimeType'       => $mimeType,
-                'filename'       => $filename ?: '(ninguno)',
-                'hasAttachmentId'=> $attachmentId ? 'sí' : 'no',
-                'hasInlineData'  => $body?->getData() ? 'sí' : 'no',
+                'mimeType'        => $mimeType,
+                'filename'        => $filename ?: '(ninguno)',
+                'hasAttachmentId' => $attachmentId ? 'sí' : 'no',
+                'hasInlineData'   => $body?->getData() ? 'sí' : 'no',
             ]);
 
             /*-------------------------------------------
@@ -354,13 +249,9 @@ class GmailService
             }
 
             /*-------------------------------------------
-            | 2) Detección y extracción de PDF
+            | 2) Detección y extracción de PDF (robusta)
             |-------------------------------------------*/
-            $esPdf = (
-                ($filename && Str::endsWith(strtolower($filename), '.pdf'))
-                || $mimeType === 'application/pdf'
-                || ($filename && $mimeType === 'application/octet-stream') // Caso común para adjuntos genéricos
-            );
+            $esPdf = $this->isRealPdfCandidate($mimeType, $filename);
 
             if ($esPdf && $body) {
                 Log::info("📄 Potencial PDF detectado en mensaje {$messageId}. Filename: '{$filename}', MimeType: '{$mimeType}'");
@@ -372,18 +263,49 @@ class GmailService
                         $attachment = $this->service->users_messages_attachments->get('me', $messageId, $attachmentId);
                         $pdfRawData = base64_decode(strtr($attachment->getData(), '-_', '+/'));
                         Log::info("Datos de PDF adjunto recuperados para '{$filename}'");
-
                     } elseif ($body->getData()) {
                         Log::debug("Intentando obtener PDF inline (base64) directamente desde la parte.");
                         $pdfRawData = base64_decode(strtr($body->getData(), '-_', '+/'));
                         Log::info("Datos de PDF inline recuperados para '{$filename}'");
                     }
 
-                    if ($pdfRawData) {
-                        // Log de validación: los PDF empiezan con "%PDF" (hex: 25 50 44 46)
-                        Log::debug("Inicio binario del PDF (hex): " . bin2hex(substr($pdfRawData, 0, 8)));
+                    if (!$pdfRawData) {
+                        Log::warning("⚠️ Se detectó un PDF ('{$filename}') pero no se pudo recuperar su contenido binario en mensaje {$messageId}.");
+                        // No hay nada que parsear; continúa con la siguiente parte
+                        goto descend;
+                    }
 
-                        $parser   = new PdfParser();
+                    // 2.1 Denylist por extensión común mal etiquetada
+                    $lowerName = strtolower($filename ?? '');
+                    $denyByExt = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.doc', '.docx'];
+                    $skipByExt = false;
+                    foreach ($denyByExt as $ext) {
+                        if ($lowerName && str_ends_with($lowerName, $ext)) {
+                            $skipByExt = true;
+                            break;
+                        }
+                    }
+                    if ($skipByExt) {
+                        Log::warning("Adjunto omitido por extensión no-PDF aunque venga como octet-stream: '{$filename}' en {$messageId}");
+                        goto descend;
+                    }
+
+                    // 2.2 Límite de tamaño (defensa)
+                    $bytes = strlen($pdfRawData);
+                    if ($bytes > 20 * 1024 * 1024) { // 10MB
+                        Log::notice("PDF omitido por tamaño ({$bytes} bytes): '{$filename}' en {$messageId}");
+                        goto descend;
+                    }
+
+                    // 2.3 Validación de firma %PDF-
+                    if (!$this->hasPdfSignature($pdfRawData)) {
+                        Log::warning("Adjunto con nombre/MIME de PDF pero sin firma %PDF-, se omite: '{$filename}' en {$messageId}");
+                        goto descend;
+                    }
+
+                    // 2.4 Parseo con Smalot (manejo de cifrados)
+                    try {
+                        $parser   = new \Smalot\PdfParser\Parser();
                         $document = $parser->parseContent($pdfRawData);
                         $pdfText  = $document->getText();
 
@@ -396,13 +318,27 @@ class GmailService
                         } else {
                             Log::warning("⚠️ El PDF '{$filename}' en mensaje {$messageId} fue procesado pero no contenía texto legible o estaba vacío.");
                         }
-                    } else {
-                         Log::warning("⚠️ Se detectó un PDF ('{$filename}') pero no se pudo recuperar su contenido binario en mensaje {$messageId}.");
+                    } catch (\Exception $e) {
+                        $msg = $e->getMessage() ?? '';
+                        // Smalot no soporta PDFs protegidos/encifrados
+                        if (stripos($msg, 'Secured pdf file') !== false || stripos($msg, 'Encrypted') !== false) {
+                            $emailData['adjuntos_pdf_texto'][] = [
+                                'filename'       => $filename ?: 'adjunto.pdf',
+                                'content'        => null,
+                                'skipped_reason' => 'pdf_protegido',
+                            ];
+                            Log::notice("PDF protegido omitido: '{$filename}' en {$messageId}");
+                        } else {
+                            Log::warning("No se pudo leer PDF '{$filename}' en {$messageId}: {$msg}");
+                        }
                     }
+
                 } catch (\Exception $e) {
-                    Log::error("❌ Error fatal procesando PDF '{$filename}' en {$messageId}: " . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+                    Log::warning("No se pudo procesar un adjunto marcado como PDF '{$filename}' en {$messageId}: " . $e->getMessage());
                 }
             }
+
+            descend:
 
             /*-------------------------------------------
             | 3) Recursividad en sub-partes
@@ -414,6 +350,51 @@ class GmailService
         }
     }
 
+    /**
+     * Determina si una parte es candidata real a PDF basándose en MIME + nombre.
+     * - Acepta application/pdf
+     * - Acepta application/octet-stream SOLO si el nombre termina en .pdf
+     * - Acepta otros MIME mal etiquetados si el nombre termina en .pdf
+     */
+    private function isRealPdfCandidate(string $mimeType, ?string $filename): bool
+    {
+        $lowerName = strtolower($filename ?? '');
+
+        $looksLikePdfByName = $lowerName !== '' && str_ends_with($lowerName, '.pdf');
+
+        if ($mimeType === 'application/pdf') {
+            return true;
+        }
+
+        if ($mimeType === 'application/octet-stream' && $looksLikePdfByName) {
+            return true;
+        }
+
+        // Algunos proveedores ponen text/plain o application/* raros, confía en el nombre .pdf
+        if ($looksLikePdfByName) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Comprueba la firma PDF al inicio del binario (debe empezar por "%PDF-").
+     */
+    private function hasPdfSignature(string $data): bool
+    {
+        // Quita BOM UTF-8 y espacios/control al principio
+        // 0xEFBBBF (BOM), espacios, tabs, CR, LF, FF, NUL
+        $data = preg_replace('/^\xEF\xBB\xBF/', '', $data); 
+        $data = ltrim($data, "\x00\x09\x0A\x0C\x0D\x20");
+
+        // Acepta "%PDF-" en los primeros bytes (por si quedó algo mínimo)
+        // Para mayor robustez: buscar "%PDF-" en los primeros 8 bytes
+        $head = substr($data, 0, 8);
+        return str_contains($head, '%PDF-');
+    }
+
+    
     private function getMessageBody(\Google\Service\Gmail\MessagePart $payload): string
     {
         $body = ''; $parts = $payload->getParts();
@@ -444,4 +425,149 @@ class GmailService
         }
         return $body;
     }
+
+    /**
+     * Normaliza queries procedentes de config/aerolineas.php (gmail_query_tags):
+     * - Prefija in:anywhere si falta
+     * - Añade rango de fechas si el tag no trae after:/before:/newer_than:/older_than:
+     */
+    private function buildQueriesFromAirlineConfig(string $dateRange): array
+    {
+        $queries = [];
+        $airlinesCfg = config('aerolineas') ?? [];
+
+        foreach ($airlinesCfg as $key => $info) {
+            if (empty($info['gmail_query_tags']) || !is_array($info['gmail_query_tags'])) continue;
+
+            foreach ($info['gmail_query_tags'] as $raw) {
+                $q = trim($raw);
+
+                if (stripos($q, 'in:anywhere') === false) {
+                    $q = 'in:anywhere ' . $q;
+                }
+
+                $hasDate = (stripos($q, ' after:') !== false)
+                        || (stripos($q, ' before:') !== false)
+                        || (stripos($q, ' newer_than:') !== false)
+                        || (stripos($q, ' older_than:') !== false);
+
+                if (!$hasDate && $dateRange) {
+                    $q .= ' ' . $dateRange;
+                }
+
+                $queries[] = $q;
+            }
+        }
+        return array_values(array_unique($queries));
+    }
+
+    /** Devuelve "after:YYYY/MM/DD [before:YYYY/MM/DD]" según haya fin o no */
+    private function makeDateRange(?string $desdeYmd = null, ?string $hastaYmd = null): string
+    {
+        $range = '';
+        if ($desdeYmd) $range .= "after:{$desdeYmd}";
+        if ($hastaYmd) $range .= (empty($range) ? '' : ' ') . "before:{$hastaYmd}";
+        return $range;
+    }
+
+    /**
+     * Construye TODAS las queries: las de config + tus fallbacks genéricos.
+     * Añade también el dominio relay 'entsvcs.com' (Copa), sin romper los demás.
+     */
+    private function composeQueries(string $dateRange, ?string $specificType): array
+    {
+        $queries = [];
+
+        // 1) queries definidas en config/aerolineas.php
+        $queries = array_merge($queries, $this->buildQueriesFromAirlineConfig($dateRange));
+
+        // 2) fallbacks genéricos (solo para aerolíneas)
+        if ($specificType === 'airline' || $specificType === null) {
+            // ⚠️ si no hay keywords, evita subject:()
+            $subjectKeywords = implode(' OR ', array_filter($this->airlineKeywords ?? []));
+            $genericKeywords = implode(' OR ', array_filter($this->defaultKeywords ?? []));
+
+            $fromDomainList = $this->airlineDomains ?: [];
+            $fromDomainList[] = 'entsvcs.com'; // relay que usa Copa
+            $fromDomainList = array_values(array_unique($fromDomainList));
+            $fromDomains = implode(' OR ', array_map(fn($d) => "from:{$d}", $fromDomainList));
+
+            if (!empty($fromDomains) && $subjectKeywords !== '') {
+                $queries[] = "in:anywhere ({$fromDomains}) subject:({$subjectKeywords}) {$dateRange}";
+            }
+
+            // Frases típicas (robusto, sin depender de listas globales)
+            $queries[] = 'in:anywhere subject:("recibo y confirmación de boleto" OR "confirmacion de boleto" OR "e-ticket receipt" OR "pase de abordar" OR "pases de abordar" OR "itinerario" OR "itinerario de viaje" OR "reserva de vuelo" OR "flight booking" OR "confirmación de vuelo" OR "boarding pass") has:attachment ' . $dateRange;
+
+            if ($genericKeywords !== '') {
+                $queries[] = 'in:anywhere ("vuelo" OR "aerolínea" OR "flight" OR "airline" OR "PNR") subject:(' . $genericKeywords . ') ' . $dateRange;
+            }
+
+            // 🎯 Rescate muy específico para tu caso real (sin filtrar por adjunto)
+            $queries[] = 'in:anywhere from:call_center_services@css.copaair.com subject:("recibo y confirmación de boleto" OR "confirmacion de boleto") ' . $dateRange;
+        }
+
+        return array_values(array_unique(array_filter($queries)));
+    }
+
+    /**
+     * Ejecuta el bucle de búsqueda en Gmail (paginación, includeSpamTrash, dedupe),
+     * y devuelve el array de emails ya con contenido extraído.
+     */
+    private function runQueries(array $queries): array
+    {
+        $emailsOutput = [];
+        $processedMessageIds = [];
+        $includeSpamTrash = (bool) config('services.google.include_spam_trash', true);
+
+        foreach ($queries as $query) {
+            try {
+                \Log::debug("Ejecutando query para {$this->email}: {$query}");
+                $optParams = [
+                    'q' => $query,
+                    'maxResults' => 50,
+                    'includeSpamTrash' => $includeSpamTrash,
+                ];
+
+                $pageToken = null;
+                do {
+                    if ($pageToken) $optParams['pageToken'] = $pageToken;
+
+                    $response = $this->service->users_messages->listUsersMessages('me', $optParams);
+
+                    if ($response->getMessages()) {
+                        foreach ($response->getMessages() as $message) {
+                            $messageId = $message->getId();
+                            if (isset($processedMessageIds[$messageId])) continue;
+                            $processedMessageIds[$messageId] = true;
+
+                            try {
+                                $fullMessage = $this->service->users_messages->get('me', $messageId, ['format' => 'FULL']);
+                                $extractedContentArray = $this->extractEmailContent($fullMessage);
+                                $emailsOutput[] = [
+                                    'id'           => $messageId,
+                                    'content'      => $extractedContentArray,
+                                    'email_origen' => $this->email,
+                                ];
+                            } catch (\Exception $e) {
+                                \Log::error("Error procesando mensaje ID {$messageId}: " . $e->getMessage());
+                            }
+                        }
+                    }
+
+                    $pageToken = $response->getNextPageToken();
+                } while ($pageToken);
+
+            } catch (\Google\Service\Exception $e) {
+                $errorDetails = json_decode($e->getMessage(), true);
+                \Log::error("Error de Google API para query '{$query}' / {$this->email}: " . ($errorDetails['error']['message'] ?? $e->getMessage()));
+                if ($e->getCode() == 401 || $e->getCode() == 403) throw $e;
+            } catch (\Exception $e) {
+                \Log::error("Error general para query '{$query}' / {$this->email}: " . $e->getMessage());
+            }
+        }
+
+        return $emailsOutput;
+    }
+
 }

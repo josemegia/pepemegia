@@ -59,9 +59,12 @@ class AppServiceProvider extends ServiceProvider
             $schemeHost = request()->getSchemeAndHttpHost();
 
             $domainMap = config('app.domain_map', []);
-            $name = $domainMap[$host] ?? $domainMap['default'] ?? 'PepeMegia.com';
+            $name = $domainMap[$host] ?? $domainMap['default'] ?? PHP_URL_HOST;
+            
+            $email = 'admin@' . $host;
 
             config([
+                'app.name'                          => $name,
                 'app.url'                           => $schemeHost,
                 'app.iso2'                          => request()->server('HTTP_X_COUNTRY_CODE', 'es'),
                 'app.4life'                         => request()->server('HTTP_X_PREFIX', 'usspanish.4life.com'),
@@ -69,11 +72,16 @@ class AppServiceProvider extends ServiceProvider
                 'app.country'                       => request()->server('HTTP_X_COUNTRY_NAME',''),
                 'app.city'                          => request()->server('HTTP_X_CITY',''),
                 'filesystems.public.url'            => $schemeHost.'/storage',
-                'fourlife.default.email'            => 'admin@'.$host,
+                'fourlife.default.email'            => $email,
                 'fourlife.default.dominio'          => $host,
                 'services.twitter-oauth-2.redirect'         => $schemeHost . env('TWITTER_REDIRECT_URI'),
                 'services.github.redirect'          => $schemeHost . env('GITHUB_REDIRECT_URI'),
                 'services.google.redirect'          => $schemeHost . env('GOOGLE_OAUTH_REDIRECT_URI'),
+
+                'mail.mailers.smtp.username' => $email,
+                'mail.from.address' => $email,
+                'mail.from.name' => $name,
+
             ]);
 
             View::share('appName', $name);

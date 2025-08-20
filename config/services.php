@@ -17,6 +17,12 @@ return [
         'command' => base_path('python/venv/bin/python') . ' ' . base_path('python/detect_eye.py'),
     ],
 
+    'zoom' => [
+        'client_id' => env('ZOOM_4LIFE_OVH_CLIENT'),
+        'client_secret' => env('ZOOM_4LIFE_OVH_SECRET'),
+        'account_id' => env('ZOOM_4LIFE_OVH_ACCOUNT'),
+    ],
+
     'twitter-oauth-2' => [
         'client_id' => env('TWITTER_CLIENT_ID'),
         'client_secret' => env('TWITTER_CLIENT_SECRET'),

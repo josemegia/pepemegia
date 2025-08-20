@@ -29,6 +29,7 @@
             :data="$data"
             :regions="$regions"
             :region="$defaultregion"
+            :presetlinks="$presetlinks"
         />
 
         <x-flyer.event-details-display :data="$data" />

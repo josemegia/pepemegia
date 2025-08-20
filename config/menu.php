@@ -9,13 +9,47 @@ return [
     'default' => 'es',
 
     'divisas' => [
-        'us' => ['en_US','cambio' => [1, 1]],
-        'co' => ['es_CO','cambio' => [2400, 2400],'dec' => false],
-        'cr' => ['es_CR','cambio' => [580, 580],'dec' => false],
-        'es' => ['es_ES','cambio' => [0.8, 0.769]],
-        'mx' => ['es_MX','cambio' => [18, 18],'dec' => false],
+        'us' => [
+            'idioma'  => 'en_US',
+            'cambio'  => [1, 1],
+            'dec'     => true,
+            'code'    => 'USD',
+            'symbol'  => '$',
+        ],
+        
+        'co' => [
+            'idioma'  => 'es_CO',
+            'cambio'  => [2400, 2400],
+            'dec'     => false,
+            'code'    => 'COP',
+            'symbol'  => '$',
+        ],
+        
+        'cr' => [
+            'idioma'  => 'es_CR',
+            'cambio'  => [580, 580],
+            'dec'     => false,
+            'code'    => 'CRC',
+            'symbol'  => '₡',
+        ],
+        
+        'es' => [
+            'idioma'  => 'es_ES',
+            'cambio'  => [0.8, 0.769],
+            'dec'     => true,
+            'code'    => 'EUR',
+            'symbol'  => '€',
+        ],
+        
+        'mx' => [
+            'idioma'  => 'es_MX',
+            'cambio'  => [18, 18],
+            'dec'     => false,
+            'code'    => 'MXN',
+            'symbol'  => '$',
+        ],
     ],
-
+    
     // Ítems del menú principal
     'items' => [
 
