@@ -8,8 +8,8 @@ return [
     'subtitle' => 'Una oportunidad real',
 
     'event' => [
-        'date' => 'Viernes, 5 de agosto',
-        'time' => '9 PM (Hora España)',
+        'date' => '2000-00-01', 
+        'time' => '00:00',
         'platform' => 'Vía Zoom 94697349280',
         'platform_details' => 'Clave: SEN',
     ],
@@ -94,6 +94,11 @@ return [
             'name' => 'Diseño 2025',
             'view' => 'flyer.formats.2025',
             'description' => 'Algo Nuevo.',
+        ],
+        '2026' => [
+            'name' => 'Diseño 2026',
+            'view' => 'flyer.formats.2026',
+            'description' => 'Lo que viene.',
         ],
         'overlay' => [
             'name' => 'Dynamic Overlay',

@@ -64,6 +64,16 @@ return [
             'title' => 'menu.stays_by_country_title',
         ],
         [
+            'label'   => 'OpenVpn Conf.',
+            'route'     => 'admin.ovpn.index',
+            'can'     => 'access-ovpn',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-window-restore'],
+                ['type' => 'text', 'key' => '.ovpn'],
+            ],
+            'title' => 'OpenVPN Conf.',
+        ],
+        [
             'label'   => 'menu.horizon',
             'url'     => '/horizon',
             'target'  => '_blank',

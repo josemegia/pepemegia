@@ -36,10 +36,6 @@ class FlyerController extends Controller
         $this->phoneService = $phoneService;
     }
 
-    /**
-     * Muestra la página principal del flyer para el "administrador".
-     * Permite la rotación de temas y carga el formato guardado o por defecto.
-     */
     public function show(Request $request)
     {
         // 1. Lógica de tema: solo rotar si NO vienes de un guardado exitoso
@@ -90,7 +86,7 @@ class FlyerController extends Controller
 
         $response = response()->view($activeFormatView, [
             'theme' => $theme,
-            'data' => $flyerData,
+            'data' => $this->fillMissingEventData($flyerData),
             'is_shared_view' => false,
             'current_format_name' => $activeFormatName,
             'available_formats' => config('flyer.formats'),
@@ -103,10 +99,6 @@ class FlyerController extends Controller
         return $response;
     }
 
-    /**
-     * Muestra un flyer guardado y compartible.
-     * Carga el tema y el formato guardados en el JSON.
-     */
     public function showShared($uuid, $filename)
     {
         $filePath = "flyers/shared/{$uuid}/{$filename}";
@@ -137,10 +129,6 @@ class FlyerController extends Controller
         ]);
     }
 
-    /**
-     * Muestra el formulario para editar/crear un flyer.
-     * Carga los datos existentes y los formatos disponibles.
-     */
     public function showForm()
     {
         $data = $this->loadFlyerData();
@@ -162,10 +150,6 @@ class FlyerController extends Controller
             'presetlinks' => config('flyer.links',[]),
         ]);
     }
-
-    /**
-     * Valida y guarda los datos del formulario en un archivo JSON.
-     */
 
     public function update(Request $request)
     {
@@ -401,7 +385,12 @@ class FlyerController extends Controller
                 'filename' => $filename
             ]);
 
-            $sharedLink = $this->shortener->generate($longSharedLink).'?lang='.config('app.iso2');
+            $longSharedLinkLang = $longSharedLink;
+            if (!str_contains($longSharedLink, 'lang=')) {
+                $separator = str_contains($longSharedLink, '?') ? '&' : '?';
+                $longSharedLinkLang = $longSharedLink . $separator . 'lang=' . config('app.iso2', 'es');
+            }
+            $sharedLink = $this->shortener->generate($longSharedLinkLang);
 
             // Si el enlace contiene 'pending', actualizar el JSON compartido con el short code extraído
             if (strpos($dataToSave['cta']['link'], 'pending') !== false) {
@@ -455,10 +444,6 @@ class FlyerController extends Controller
         return $redirect->with($flashData);
     }
 
-    /**
-     * Resetea el tema y el formato de la sesión a sus valores por defecto.
-     * Nota: Esto NO borra el archivo JSON guardado.
-     */
     public function reset()
     {
         session()->forget('current_flyer_theme');
@@ -482,10 +467,6 @@ class FlyerController extends Controller
         return redirect()->route('flyer.show')->with('message', 'Flyer restaurado a formato y tema por defecto.');
     }
 
-    /**
-     * MÉTODOS AUXILIARES para cargar y guardar los datos del flyer.
-     * Asumen un ID fijo para el flyer de administración (ej. 1).
-     */
     protected function loadFlyerData($id = null)
     {
         $id = $id ?? $this->getAdminSessionId(); // Usa sesión si no se pasa explícito
@@ -614,6 +595,30 @@ class FlyerController extends Controller
     {
         session()->put('flyer_was_shared', true);
         return response()->json(['message' => 'OK']);
+    }
+
+    private function fillMissingEventData(array $data): array
+    {
+        // Condición: solo actuar si los datos son los placeholders
+        if (($data['event']['date'] ?? null) === '2000-00-01' && ($data['event']['time'] ?? null) === '00:00') {
+
+            // --- Lógica de la Fecha 📅 ---
+            $fechaObjetivo = new \DateTime('now', new \DateTimeZone('America/Bogota'));
+            if ($fechaObjetivo->format('N') != 2) {
+                $fechaObjetivo->modify('next tuesday');
+            }
+
+            // --- Lógica de la Hora y Conversión 🌍 ---
+            $horaEnMadrid = new \DateTime($fechaObjetivo->format('Y-m-d') . ' 23:00:00', new \DateTimeZone('Europe/Madrid'));
+            $horaEnMadrid->setTimezone(new \DateTimeZone('UTC'));
+
+            // --- Actualización del array $data ---
+            $data['event']['date'] = $fechaObjetivo->format('Y-m-d');
+            $data['event']['time'] = $horaEnMadrid->format('H:i');
+        }
+
+        // Devuelve el array, modificado o no
+        return $data;
     }
 
 }

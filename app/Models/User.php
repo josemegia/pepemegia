@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Schema;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -12,11 +13,6 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
         'name',
         'email',
@@ -33,25 +29,15 @@ class User extends Authenticatable
         'phone_number',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
         'two_factor_secret',
         'two_factor_recovery_codes',
-        'social_provider_token',       // Ocultar tokens sensibles
-        'social_provider_refresh_token', // Ocultar tokens sensibles
+        'social_provider_token',
+        'social_provider_refresh_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -61,12 +47,6 @@ class User extends Authenticatable
         ];
     }
 
-    /**
-     * Verifica si el usuario tiene un rol específico.
-     *
-     * @param string|array $role Los roles a verificar (ej. 'admin', ['editor', 'admin'])
-     * @return bool
-     */
     public function hasRole($role): bool
     {
         // Esta es la implementación más simple, asumiendo una columna 'role' en tu tabla de usuarios.
@@ -77,12 +57,6 @@ class User extends Authenticatable
         return $this->role === $role;
     }
 
-    /**
-     * Conveniencia para verificar si el usuario es un administrador.
-     * Asume que el rol de administrador se llama 'admin'.
-     *
-     * @return bool
-     */
     public function isAdmin(): bool
     {
         return $this->hasRole('admin');
@@ -91,5 +65,16 @@ class User extends Authenticatable
     public function sendEmailVerificationNotification()
     {
         $this->notify(new \App\Notifications\CustomVerifyEmail);
+    }
+
+    public function hasPassword(): bool
+    {
+        return $this->password !== null;
+    }
+
+    public function hasTwoFactorEnabled(): bool
+    {
+        return !empty($this->two_factor_secret) &&
+               !empty($this->two_factor_confirmed_at);
     }
 }

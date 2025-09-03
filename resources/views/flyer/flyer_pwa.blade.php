@@ -20,7 +20,6 @@
 
 </head>
 <body>
-
     <div class="bg-gray-900 flex flex-col items-center justify-center min-h-screen p-4 {{ $theme['font_family_class'] ?? 'font-sans' }}">
         <div class="text-white w-full max-w-4xl mx-auto">
             {{-- Mensaje de éxito solo para admins --}}

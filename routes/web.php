@@ -1,26 +1,53 @@
 <?php
 
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Session;
+
+use Illuminate\Support\Facades\{
+    Storage,
+    Session,
+    Auth,
+    Route
+    };
+
+use App\Http\Controllers\{
+    FlyerController,
+    ShortUrlController,
+    GoogleAuthController,
+    PresentacionController,
+    VentasController,
+    IframeController,
+    PosterController,
+
+    Auth\TwoFactorAuthenticationController,
+    Auth\TwoFactorRecoveryCodesController,
+    Auth\TwoFactorQrCodeController,
+    Auth\SocialiteController,
+    Auth\ProfileController,
+
+    Admin\RecaptchaBlockController,
+    Admin\AdminUsersController,
+    Admin\AirportController,
+    Admin\StayController
+    };
 
 use App\Services\ShortUrlService;
+/*
+/////test notify
+use App\Models\User;
+use App\Notifications\WelcomeNotification;
+Route::get('/test/{user}', function (User $user) {
+    // Forzamos un idioma si quieres, o respetamos el del user
+    $user->notify(
+        (new WelcomeNotification())->locale($user->locale ?? app()->getLocale())
+    );
 
-// Controllers
-use App\Http\Controllers\FlyerController;
-use App\Http\Controllers\ShortUrlController;
-use App\Http\Controllers\GoogleAuthController;
-use App\Http\Controllers\PresentacionController;
-use App\Http\Controllers\VentasController;
-use App\Http\Controllers\IframeController;
-use App\Http\Controllers\Auth\SocialiteController;
-use App\Http\Controllers\Auth\ProfileController;
-use App\Http\Controllers\Admin\AdminUsersController;
-use App\Http\Controllers\Admin\RecaptchaBlockController;
-use App\Http\Controllers\Admin\AirportController;
-use App\Http\Controllers\Admin\StayController;
+    // Verificación de email (usa tu CustomVerifyEmail)
+    $user->sendEmailVerificationNotification();
 
+    return 'OK: WelcomeNotification + VerifyEmail encolados/enviados';
+})->middleware('auth');
+/////fin test
+*/
 // Página principal y privacidad
 Route::view('/', 'inicio')->name('inicio');
 Route::view('/privacidad', 'privacidad')->name('privacidad');
@@ -33,6 +60,73 @@ Route::get('/j/{code}', [ShortUrlController::class, 'zoom'])->name('shorturl.zoo
 Route::prefix('auth')->name('socialite.')->group(function () {
     Route::get('/{provider}/redirect', [SocialiteController::class, 'redirectToProvider'])->name('redirect');
     Route::get('/{provider}/callback', [SocialiteController::class, 'handleProviderCallback'])->name('callback');
+});
+
+// Rutas autenticadas
+Route::middleware('auth')->group(function () {
+    Route::prefix('profile')->name('profile.')->group(function () {
+        Route::get('/logout', function (Request $request) {Auth::logout();$request->session()->invalidate();$request->session()->regenerateToken();return redirect('/login');})->name('logout');
+        Route::view('/dashboard', 'auth.dashboard')->name('dashboard');
+        Route::get('/edit', [ProfileController::class, 'edit'])->name('edit');
+        Route::put('/', [ProfileController::class, 'update'])->name('update');
+        Route::put('/password', [ProfileController::class, 'updatePassword'])->name('update-password');
+        Route::delete('/', [ProfileController::class, 'destroy'])->name('destroy');
+        Route::post('/two-factor-authentication', [TwoFactorAuthenticationController::class, 'store'])->name('two-factor.enable');
+        Route::delete('/two-factor-authentication', [TwoFactorAuthenticationController::class, 'destroy'])->name('two-factor.disable');
+        Route::get('/two-factor-qr-code', [TwoFactorQrCodeController::class, 'show'])->name('two-factor.qr-code');
+        Route::get('/two-factor-recovery-codes', [TwoFactorRecoveryCodesController::class, 'index'])->name('two-factor.recovery-codes');
+        Route::post('/two-factor-authentication/confirm', [TwoFactorAuthenticationController::class, 'confirm'])->name('two-factor.confirm');
+    });
+
+    // Admin
+    Route::middleware('admin')->prefix('admin')->name('admin.')->group(function () {
+        Route::get('iframe', [IframeController::class, 'show'])->name('iframe');
+        Route::resource('users', AdminUsersController::class);
+        Route::view('/dashboard', 'admin.dashboard')->name('dashboard');
+
+        Route::prefix('recaptcha')->name('recaptcha.')->group(function () {
+            Route::get('/', [RecaptchaBlockController::class, 'index'])->name('index');
+            Route::delete('/{ip}', [RecaptchaBlockController::class, 'destroy'])->name('destroy');
+        });
+
+        // OpenVpn Configs
+        Route::prefix('ovpn')->name('ovpn.')->group(function () {
+            Route::get('/', function () {
+                return view('ovpn');
+            })->name('index');
+
+            Route::get('/download/{server}.ovpn', function ($server) {
+                $server = basename($server);
+                $filename = 'ovpn/' . $server . '.ovpn';
+                if (Storage::disk('local')->exists($filename)) {
+                    $file = Storage::disk('local')->get($filename);
+                    return response($file, 200)
+                        ->header('Content-Type', 'application/octet-stream')
+                        ->header('Content-Disposition', 'attachment; filename="' . $server . '.ovpn"');
+                } else {
+                    abort(404, 'File not found.');
+                }
+            })->name('download');
+        });
+
+        // Rutas de Configuración (placeholders)
+        Route::prefix('settings')->name('settings.')->group(function () {
+            Route::view('/general', 'admin.settings.general')->name('general');
+            Route::view('/email', 'admin.settings.email')->name('email');
+            Route::view('/integrations', 'admin.settings.integrations')->name('integrations');
+        });
+
+        // Aeropuertos
+        Route::prefix('airports')->name('airports.')->group(function () {
+            Route::get('/tool', [AirportController::class, 'showAirportAdminToolPage'])->name('tool');
+            Route::get('/viajes', [AirportController::class, 'viajes'])->name('viajes.dashboard');
+        });
+
+        // Estancias por País
+        Route::prefix('stays')->name('stays.')->group(function () {
+            Route::get('/', [AirportController::class, 'viajes'])->name('index');
+        });
+    });
 });
 
 // Plan/presentación
@@ -56,7 +150,6 @@ Route::prefix('ventas')->name('ventas.')->group(function () {
 
 });
 
-
 // Flyers
 Route::prefix('flyer')->name('flyer.')->group(function () {
     Route::get('/', [FlyerController::class, 'show'])->name('show');
@@ -76,53 +169,18 @@ Route::prefix('flyer')->name('flyer.')->group(function () {
     })->name('nextFormat');
 });
 
-// Rutas autenticadas
-Route::middleware('auth')->group(function () {
-    Route::prefix('profile')->name('profile.')->group(function () {
-        Route::get('/logout', function (Request $request) {
-            Auth::logout();
-            $request->session()->invalidate();
-            $request->session()->regenerateToken();
-            return redirect('/login');})->name('logout');
-        Route::view('/dashboard', 'auth.dashboard')->name('dashboard');
-        Route::get('/edit', [ProfileController::class, 'edit'])->name('edit');
-        Route::put('/', [ProfileController::class, 'update'])->name('update');
-        Route::put('/password', [ProfileController::class, 'updatePassword'])->name('update-password');
-        Route::delete('/', [ProfileController::class, 'destroy'])->name('destroy');
-    });
-    // Admin
-    Route::middleware('admin')->prefix('admin')->name('admin.')->group(function () {
-        Route::get('iframe', [IframeController::class, 'show'])->name('iframe');
-        Route::resource('users', AdminUsersController::class);
-        Route::view('/dashboard', 'admin.dashboard')->name('dashboard');
-        Route::prefix('recaptcha')->name('recaptcha.')->group(function () {
-            Route::get('/', [RecaptchaBlockController::class, 'index'])->name('index');
-            Route::delete('/{ip}', [RecaptchaBlockController::class, 'destroy'])->name('destroy');
-        });
-
-        // Rutas de Configuración (placeholders)
-        Route::prefix('settings')->name('settings.')->group(function () {
-            Route::view('/general', 'admin.settings.general')->name('general');
-            Route::view('/email', 'admin.settings.email')->name('email');
-            Route::view('/integrations', 'admin.settings.integrations')->name('integrations');
-        });
-
-        // Aeropuertos
-        Route::prefix('airports')->name('airports.')->group(function () {
-            Route::get('/tool', [AirportController::class, 'showAirportAdminToolPage'])->name('tool');
-            Route::get('/viajes', [AirportController::class, 'viajes'])->name('viajes.dashboard');
-        });
-
-        // Estancias por País
-        Route::prefix('stays')->name('stays.')->group(function () {
-            Route::get('/', [AirportController::class, 'viajes'])->name('index');
-        });
+// Poster
+Route::prefix('poster')->name('poster.')->group(function () {
+    Route::get('/', [PosterController::class, 'index'])->name('index');
+    Route::get('/state',  [PosterController::class, 'state'])->name('state.get');
+    Route::post('/state', [PosterController::class, 'stateSave'])->name('state.save');
+    Route::get('/rebuild-assets', [PosterController::class, 'rebuildAssets']);
+    Route::middleware(['auth'])->group(function () {
+        Route::post('/rebuild-assets', [PosterController::class, 'rebuildAssets'])
+            ->name('assets.rebuild')
+            ->middleware('admin');
     });
 });
 
-Route::fallback(
-    function (Request $request, ShortUrlService $shortUrlService) {
-        $path = ltrim($request->path(), '/');
-        return $shortUrlService->handleFallback($path);
-    }
-);
+// Si no encuentra la ruta ...
+Route::fallback(function (Request $request, ShortUrlService $shortUrlService) {return $shortUrlService->handleFallback(ltrim($request->path(), '/'));});

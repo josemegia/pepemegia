@@ -1,0 +1,207 @@
+/* resources/css/poster.css */
+
+/* ------------------------------------------------------------------
+   IMPRESIÓN (2 páginas A4 completas, sin header/footer ni márgenes)
+------------------------------------------------------------------- */
+@page { size: A4; margin: 0; }
+
+@media print {
+  /* --- evitar cortes --- */
+  .no-split{
+    break-inside: avoid-page !important;
+    page-break-inside: avoid !important;
+  }
+  .print-wrapper,
+  .qr-draggable,
+  .data-card,
+  .card-inner{
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  /* --- fondo HD en impresión (o fallback por CSS vars) --- */
+  .print-bg{
+    display:block !important;
+    position:absolute; inset:0;
+    width:100%; height:100%;
+    object-fit:cover;
+    z-index:-1;
+  }
+  .screen-bg{ display:none !important; }
+  .bg-anverso{ background-image:var(--bg-anverso-print, var(--bg-anverso)) !important; }
+  .bg-reverso{ background-image:var(--bg-reverso-print, var(--bg-reverso)) !important; }
+
+  /* --- limpiar layout de la página impresa --- */
+  header, footer, .header-content, .main-menu-container,
+  .no-print{ display:none !important; }
+
+  html, body{
+    width:210mm !important;
+    height:auto !important;
+    margin:0 !important; padding:0 !important;
+    background:#fff !important;
+    -webkit-print-color-adjust:exact !important;
+            print-color-adjust:exact !important;
+  }
+
+  .container{ max-width:none !important; padding:0 !important; margin:0 !important; }
+  .layout-grid{ display:block !important; gap:0 !important; }
+  .preview-frame{ width:auto !important; height:auto !important; display:block !important; margin:0 !important; padding:0 !important; }
+
+  .print-wrapper{
+    width:210mm !important; height:297mm !important;
+    position:relative !important; inset:auto !important;
+    transform:none !important;
+    border-radius:0 !important; box-shadow:none !important;
+    margin:0 !important; background:#fff !important;
+    isolation:isolate;
+  }
+
+  /* fallback por CSS si no hay <img.print-bg> */
+  .bg-anverso, .bg-reverso{
+    background-size:cover !important;
+    background-position:center !important;
+    background-repeat:no-repeat !important;
+  }
+
+  /* opción "ver completo" también en impresión */
+  .contain-print .print-bg{ object-fit:contain !important; background:#fff !important; }
+  .contain-print .bg-anverso,
+  .contain-print .bg-reverso{
+    background-size:contain !important;
+    background-position:center !important;
+    background-repeat:no-repeat !important;
+    background-color:#fff !important;
+  }
+
+  /* ================== ANVERSO ==================
+     No cambiar layout: mismo flex/anchos que en pantalla.
+     Sólo anulamos backdrop-filter (no lo soportan todos los drivers). */
+  .print-wrapper.bg-anverso .data-card{
+    backdrop-filter:none !important;
+    -webkit-backdrop-filter:none !important;
+  }
+  /* ¡Nada más para el anverso! (no tocar display/width/gap/…)
+     Así imprime EXACTO como la preview. */
+
+  /* ================== REVERSO (QR) ================== */
+
+  .print-wrapper.bg-reverso .qr-box-container{
+    display:block !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    background:#fff !important;
+    border-radius:14pt !important;
+    overflow:visible !important;
+    box-shadow:0 6pt 18pt rgba(0,0,0,.18) !important;
+  }
+
+  /* Clave: NO tocar width; manda el inline :style="width:${qrSize}px" */
+  .print-wrapper.bg-reverso div[x-ref="qrBox"]{
+    display:block !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    min-width:0 !important;
+  }
+
+  .print-wrapper.bg-reverso div[x-ref="qrBox"] > div{
+    display:block !important;
+    visibility:visible !important;
+    padding:8pt 0 !important;
+  }
+
+  .print-wrapper.bg-reverso .qr-canvas{
+    display:block !important;
+    width:100% !important;
+    height:auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-wrapper.bg-reverso .qr-draggable{
+    display:block !important;
+    visibility:visible !important;
+    opacity:1 !important;
+  }
+
+  /* --- dos páginas A4 --- */
+  .print-page{ break-after:page; page-break-after:always; }
+  .print-page:last-of-type{ break-after:auto; page-break-after:auto; }
+}
+
+/* ------------------------------------------------------------------
+   PREVIEW EN PANTALLA (A4 escalado dentro de un marco)
+------------------------------------------------------------------- */
+
+.preview-frame{
+  width: calc(210mm * var(--preview-scale, .45));
+  height: calc(297mm * var(--preview-scale, .45));
+  position: relative;
+  overflow: visible;
+}
+
+.print-wrapper{
+  width: 210mm;
+  height: 297mm;
+  position: absolute; inset: 0;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: #fff;
+  box-shadow: 0 20px 45px rgba(0,0,0,.25);
+  isolation: isolate;
+}
+
+@media screen {
+  .print-wrapper{
+    transform: scale(var(--preview-scale, .45));
+    transform-origin: top left;
+  }
+
+  .contain-preview .bg-anverso,
+  .contain-preview .bg-reverso{
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-color: #fff;
+  }
+
+  .print-bg{ display:none !important; }
+}
+
+/* ------------------------------------------------------------------
+   Fondos y utilidades (comunes)
+------------------------------------------------------------------- */
+
+.bg-anverso{
+  background-image: var(--bg-anverso);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.bg-reverso{
+  background-image: var(--bg-reverso);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* Suaviza la tarjeta de datos sobre la imagen */
+.data-card{
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Mejor feedback visual al arrastrar */
+.qr-draggable{
+  cursor: move;
+  user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
+}
+
+/* El canvas del QR no desborda su tarjeta */
+.qr-canvas{
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+}

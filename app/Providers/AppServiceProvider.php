@@ -14,7 +14,9 @@ use Illuminate\Support\{
     Facades\File,
     Facades\RateLimiter,
     Facades\View,
-    Facades\Gate
+    Facades\Gate,
+    Facades\Storage,
+    Facades\Password
     };
 
 use Laravel\Fortify\Contracts\CreatesNewUsers;
@@ -25,7 +27,8 @@ use App\Http\Middleware\CheckAdminRole;
 use App\View\Components\LanguageSelector;
 use App\Support\LocaleManager;
 
-use App\Models\IsoCountryCode; 
+use App\Models\IsoCountryCode;
+use App\Models\User;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -134,7 +137,23 @@ class AppServiceProvider extends ServiceProvider
         Fortify::loginView(fn () => view('auth.login'));
         Fortify::registerView(fn () => view('auth.register'));
         Fortify::requestPasswordResetLinkView(fn () => view('auth.forgot-password'));
-        Fortify::resetPasswordView(fn (Request $request) => view('auth.reset-password', ['request' => $request]));
+        Fortify::resetPasswordView(function (Request $request) {
+            $user = User::where('email', $request->query('email'))->first();
+
+            // Verificamos si el token es válido ANTES de mostrar la vista
+            if (! $user || ! Password::broker(config('fortify.passwords'))->tokenExists($user, $request->route('token'))) {
+                // Si no es válido, redirigimos a la página para solicitar un nuevo enlace
+                return redirect()->route('password.request')
+                        ->withErrors(['email' => __('El token de restablecimiento de contraseña es inválido.')]);
+            }
+
+            // Si el token es válido, mostramos la vista con los datos
+            return view('auth.reset-password', [
+                'token' => $request->route('token'),
+                'email' => $request->query('email'),
+            ]);
+        });
+        Fortify::twoFactorChallengeView(fn () => view('auth.two-factor-challenge'));
     }
 
     protected function shareAvailableLocales(): void

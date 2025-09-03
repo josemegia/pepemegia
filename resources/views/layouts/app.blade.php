@@ -30,7 +30,7 @@
             openMobileMenu: false,
             menuStyle: localStorage.getItem('menuStyle') || 'default',
             toggleMenuStyle() {
-                const styles = ['default', 'fancy', 'modern'];
+                const styles = ['default', 'light', 'fancy', 'modern'];
                 const idx = styles.indexOf(this.menuStyle);
                 this.menuStyle = styles[(idx + 1) % styles.length];
             }

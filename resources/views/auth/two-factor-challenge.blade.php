@@ -6,7 +6,7 @@
 <div class="container mx-auto max-w-md py-8">
     <h2 class="text-2xl font-bold mb-6 text-center">{{ __('Two Factor Authentication') }}</h2>
 
-    <form method="POST" action="{{ route('two-factor.login') }}" class="space-y-6">
+    <form method="POST" action="{{ route('two-factor.login.store') }}" class="space-y-6">
         @csrf
 
         <div>

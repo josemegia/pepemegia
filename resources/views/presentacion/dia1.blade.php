@@ -54,7 +54,7 @@
         <main class="w-full max-w-7xl mx-auto flex items-center justify-center gap-8 main-container">
             <div class="bg-white p-6 sm:p-8 rounded-2xl shadow-2xl main-card">
                 <header class="text-center mb-4 sm:mb-8">
-                    <h1 class="font-title text-3xl md:text-4xl font-extrabold text-gray-800">{{ __('presentation.dia1.titulo') }}</h1>
+                    <h1 class="font-title text-3xl md:text-4xl font-extrabold text-gray-800">{{ __('presentation.dia1.titulo_pagina') }}</h1>
                     <p class="text-gray-500 mt-2 text-lg">{{ __('presentation.dia1.subtitulo') }}</p>
                 </header>
                 <div class="cycle-container">

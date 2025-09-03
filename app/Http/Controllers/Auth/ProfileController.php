@@ -14,6 +14,7 @@ class ProfileController extends Controller
 {
     /**
      * Muestra el formulario de edición de perfil.
+     * (Sin cambios, es correcto)
      */
     public function edit()
     {
@@ -24,6 +25,7 @@ class ProfileController extends Controller
 
     /**
      * Actualiza la información del perfil del usuario.
+     * (Sin cambios, es correcto)
      */
     public function update(Request $request)
     {
@@ -73,24 +75,36 @@ class ProfileController extends Controller
 
     /**
      * Actualiza la contraseña del usuario.
+     * (ESTE MÉTODO HA SIDO CORREGIDO)
      */
     public function updatePassword(Request $request)
     {
         $user = Auth::user();
 
-        $request->validate([
-            'current_password' => ['required', 'string'],
-            'password' => ['required', 'string', 'min:8', 'confirmed'], // min:8, confirmed para que coincida con password_confirmation
-        ]);
+        // Se usan las reglas de validación base
+        $rules = [
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ];
 
-        // Verificar que la contraseña actual sea correcta
-        if (! Hash::check($request->current_password, $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => [__('La contraseña actual proporcionada es incorrecta.')],
-            ]);
+        // Si el usuario TIENE contraseña (no es de registro social),
+        // se añade la regla para que la contraseña actual sea obligatoria.
+        if ($user->hasPassword()) {
+            $rules['current_password'] = ['required', 'string'];
         }
 
-        // Actualizar la contraseña
+        $request->validate($rules);
+
+        // De nuevo, si el usuario TIENE contraseña, se comprueba que la actual sea correcta.
+        // Si no tiene, se salta esta comprobación.
+        if ($user->hasPassword()) {
+            if (! Hash::check($request->current_password, $user->password)) {
+                throw ValidationException::withMessages([
+                    'current_password' => [__('La contraseña actual proporcionada es incorrecta.')],
+                ]);
+            }
+        }
+
+        // Esta parte es igual para ambos: establece o actualiza la contraseña.
         $user->password = Hash::make($request->password);
         $user->save();
 
@@ -99,6 +113,7 @@ class ProfileController extends Controller
 
     /**
      * Elimina la cuenta del usuario.
+     * (Sin cambios, es correcto)
      */
     public function destroy(Request $request)
     {

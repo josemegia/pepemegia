@@ -114,6 +114,15 @@ return [
                         ['type' => 'text', 'key' => 'menu.sen_flyers_text'],
                     ],
                 ],
+                [
+                    'route'  => 'poster.index',
+                    'target' => '_self',
+                    'title'  => 'menu.poster_generator_title',
+                    'content' => [
+                        ['type' => 'icon', 'value' => 'fas fa-file-image'],
+                        ['type' => 'text', 'key' => 'menu.poster_generator_text'],
+                    ],
+                ],
             ],
         ],
 

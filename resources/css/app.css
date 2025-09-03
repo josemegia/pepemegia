@@ -5,6 +5,9 @@
 @import 'menu-default.css';
 @import 'menu-fancy.css';
 @import 'menu-modern.css';
+@import 'menu-light.css';
+@import "poster.css";
+
 
 /* Base Tailwind Imports */
 @tailwind base;

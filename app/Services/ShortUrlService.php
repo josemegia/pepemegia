@@ -45,6 +45,33 @@ class ShortUrlService
         return ShortUrl::where('short_code', $shortCode)
                        ->value('long_url');
     }
+    /**
+     * Resuelve una URL corta preservando parámetros de query cuando existan
+     */
+    public function resolveWithParams(string $shortCode, array $queryParams = []): ?string
+    {
+        $longUrl = $this->resolve($shortCode);
+        
+        if (!$longUrl) {
+            return null;
+        }
+        
+        // Solo procesar si hay parámetros de query
+        if (!empty($queryParams)) {
+            $urlParts = parse_url($longUrl);
+            $existingQuery = isset($urlParts['query']) ? $urlParts['query'] : '';
+            
+            if ($existingQuery) {
+                // La URL ya tiene parámetros, añadir con &
+                $longUrl .= '&' . http_build_query($queryParams);
+            } else {
+                // La URL no tiene parámetros, añadir con ?
+                $longUrl .= '?' . http_build_query($queryParams);
+            }
+        }
+        
+        return $longUrl;
+    }
 
     // ——————————————————————————————————————
     // “UNSHORTEN” / FALLBACK PARA 4L.SHOP

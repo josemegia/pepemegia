@@ -3,6 +3,7 @@ import sys
 import locale
 from datetime import datetime
 import os
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 
@@ -10,16 +11,33 @@ def log(msg, level="INFO"):
     """
     Función de registro mejorada.
     """
-    # Usar el formato de fecha y hora que sea más útil para tus logs de Laravel
-    # Aquí un ejemplo que coincide con el formato del log de Laravel:
-    # return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}] [{level.upper()}] {msg}", flush=True)
 
+def add_lang_if_missing(url, lang='es'):
+    """
+    Añade el parámetro lang solo si no existe ya en la URL.
+    """
+    parsed = urlparse(url)
+    query_params = parse_qs(parsed.query)
+    
+    # Solo añadir si no existe el parámetro lang
+    if 'lang' not in query_params:
+        query_params['lang'] = [lang]
+        new_query = urlencode(query_params, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
+    return url
 
-def capture_screenshot(url: str, output_path: str, device_name: str, browser_type: str = "chromium"):
+def capture_screenshot(url: str, output_path: str, device_name: str, browser_type: str = "chromium", auto_lang: bool = True):
     """
     Captura una captura de pantalla de una URL dada con Playwright.
     """
+    # Añadir idioma automáticamente si está habilitado
+    if auto_lang:
+        original_url = url
+        url = add_lang_if_missing(url)
+        if url != original_url:
+            log(f"URL modificada para incluir idioma: {url}")
+    
     # 1. Preparación del directorio de salida
     output_dir = os.path.dirname(output_path)
     if not os.path.exists(output_dir):
@@ -28,11 +46,11 @@ def capture_screenshot(url: str, output_path: str, device_name: str, browser_typ
             log(f"Directorio creado: {output_dir}")
         except OSError as e:
             log(f"❌ Error al crear el directorio {output_dir}: {e}", "ERROR")
-            return False # Fallar aquí si no se puede crear el directorio
+            return False
 
     log(f"Iniciando captura de: {url} con dispositivo '{device_name}' usando {browser_type}")
 
-    browser = None # Inicializar browser a None para el bloque finally
+    browser = None
     try:
         with sync_playwright() as p:
             # 2. Selección y validación del tipo de navegador
@@ -55,25 +73,27 @@ def capture_screenshot(url: str, output_path: str, device_name: str, browser_typ
 
             # 4. Lanzamiento del navegador
             browser = browser_launcher.launch(
-                headless=True, # Siempre headless en un servidor
-                # Puedes añadir más args para optimizar o resolver problemas de dependencia en Docker/servidor
-                # args=['--no-sandbox', '--disable-setuid-sandbox'] # Común para entornos Docker o Linux sin privilegios
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox'] if os.getenv('DOCKER_ENV') else []
             )
+            
+            # 5. Crear contexto con configuración del dispositivo
+            # Esto configura viewport, user agent, touch events, etc.
             context = browser.new_context(**device_config)
             page = context.new_page()
 
-            # 5. Navegación a la URL
+            # 6. Navegación a la URL
             try:
-                page.goto(url, wait_until="networkidle", timeout=60000) # 60 segundos de timeout para la carga
+                page.goto(url, wait_until="networkidle", timeout=60000)
             except PlaywrightTimeoutError:
                 log(f"Advertencia: Tiempo de espera (60s) agotado al cargar {url}. La página podría no haber cargado completamente.", "WARNING")
             except Exception as e:
                 log(f"❌ Error crítico al navegar a {url}: {e}", "ERROR")
-                return False # Error crítico, no se pudo navegar
+                return False
 
-            # 6. Manipulación opcional de elementos (botón)
+            # 7. Manipulación opcional de elementos (botón)
             try:
-                page.wait_for_selector("#buttons-wrapper", state="attached", timeout=5000) # 5 segundos de timeout para el selector
+                page.wait_for_selector("#buttons-wrapper", state="attached", timeout=5000)
                 page.locator("#buttons-wrapper").evaluate("e => e.remove()")
                 log("Elemento #buttons-wrapper eliminado.")
             except PlaywrightTimeoutError:
@@ -81,40 +101,42 @@ def capture_screenshot(url: str, output_path: str, device_name: str, browser_typ
             except Exception as e:
                 log(f"Advertencia: Error al intentar ocultar el botón: {e}", "WARNING")
 
-            # 7. Tomar la captura de pantalla
+            # 8. Tomar la captura de pantalla
             page.screenshot(path=output_path, full_page=True)
             log(f"✅ Captura guardada en {output_path}")
             return True
 
     except Exception as e:
-        # Captura cualquier otro error inesperado en el proceso
         log(f"❌ Error inesperado durante la captura de pantalla: {e}", "ERROR")
         return False
     finally:
-        # Asegurarse de que el navegador se cierre siempre
+        # Cerrar navegador sin warnings molestos
         if browser:
             try:
                 browser.close()
                 log("Navegador cerrado.")
             except Exception as e:
-                log(f"⚠️ Error al cerrar navegador: {e}", "WARNING")
-
-
+                # Filtrar warnings comunes de cierre
+                error_msg = str(e).lower()
+                if ("event loop is closed" not in error_msg and 
+                    "playwright already stopped" not in error_msg and
+                    "object has no attribute" not in error_msg):
+                    log(f"⚠️ Error al cerrar navegador: {e}", "WARNING")
 
 if __name__ == "__main__":
-    # Ahora esperamos 4 argumentos: script_name, url, output_path, device_name, [optional_browser_type]
+    # Uso: script_name, url, output_path, device_name, [browser_type]
     if len(sys.argv) < 4 or len(sys.argv) > 5:
         log("Uso: flyer.py <url> <output_path> <device_name> [browser_type]", "ERROR")
         log("Ejemplo: python flyer.py https://example.com /tmp/output.png 'iPhone 14 Pro Max' chromium", "ERROR")
+        log("Dispositivos populares: 'iPhone 14 Pro Max', 'iPad Pro', 'Desktop Chrome', 'Galaxy S20'", "INFO")
         sys.exit(1)
 
     url = sys.argv[1]
-    
     output_path = sys.argv[2]
     device_name = sys.argv[3]
-    browser_type = sys.argv[4] if len(sys.argv) == 5 else "chromium" # Valor por defecto
+    browser_type = sys.argv[4] if len(sys.argv) == 5 else "chromium"
 
     if capture_screenshot(url, output_path, device_name, browser_type):
-        sys.exit(0) # Éxito
+        sys.exit(0)  # Éxito
     else:
-        sys.exit(1) # Error
+        sys.exit(1)  # Error
