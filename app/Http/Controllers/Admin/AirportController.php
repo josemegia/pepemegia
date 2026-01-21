@@ -5,7 +5,8 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Reserva;
 use App\Models\AirportReference;
-use App\Models\IsoCountryCode; 
+use App\Models\IsoCountryCode;
+use App\Jobs\ExtraerVuelosJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -86,8 +87,10 @@ class AirportController extends Controller
         $actualizado = false;
 
         if (!$ultima || $ultima->diffInMinutes($ahora) > 180) {
-            Artisan::call('vuelos:extraer', ['--no-gemini' => true]);
-            Log::info("🛫 Se ejecutó vuelos:extraer automáticamente al cargar dashboard");
+            // Despacha el job a la cola. ¡Esto es casi instantáneo!
+            ExtraerVuelosJob::dispatch();
+            //Artisan::call('vuelos:extraer', ['--no-gemini' => true]);
+            Log::info("🛫 Se ejecutó job vuelos:extraer automáticamente al cargar dashboard");
             $actualizado = true;
         } else {
             Log::info("⏳ Sincronización de vuelos omitida, última ejecución: {$ultima}");

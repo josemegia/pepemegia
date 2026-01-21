@@ -102,14 +102,33 @@ return [
 
     'american_airlines' => [
         'friendly_name'         => 'American Airlines',
-        'senders'               => ['noreply@aa.com', 'eticket@americanairlines.com', 'customer.service@aa.com', 'preflight@aa.com'],
-        'domains'               => ['aa.com'],
-        'gmail_query_tags'      => [
-            'subject:(itinerary OR e-ticket OR "booking confirmation")',
-            'has:attachment filename:pdf',
-            'from:(@aa.com)'
+        'function'              => true,
+
+        'senders'               => [
+            'noreply@aa.com',
+            'eticket@americanairlines.com',
+            'customer.service@aa.com',
+            'preflight@aa.com',
+            'no-reply@info.email.aa.com',
         ],
-        'keywords'              => ['Record locator:', 'Confirmation code:']
+
+        'domains'               => [
+            'aa.com',
+            'americanairlines.com',
+            'info.email.aa.com',
+        ],
+
+        'gmail_query_tags'      => [
+            'subject:(itinerary OR e-ticket OR "booking confirmation" OR "trip confirmation" OR "record locator" OR "confirmation code")',
+            'from:(@aa.com OR @americanairlines.com OR @info.email.aa.com)',
+        ],
+
+        'specific_keywords'     => [
+            'Record locator:',
+            'Confirmation code:',
+            'Booking confirmation',
+            'Trip confirmation',
+        ],
     ],
 
     'austrian_airlines' => [
@@ -369,7 +388,10 @@ return [
         'function'        => true,
         'senders'         => ['ETServer@iberia.es', 'notificaciones@iberia.es', /* ...otros... */],
         'domains'         => ['iberia.com', 'iberia.es'],
-        'gmail_query_tags'=> ['subject:(reserva OR confirmación OR billete OR itinerario) from:(iberia.es OR iberia.com) has:attachment filename:pdf'], // Esta query es buena
+        //'gmail_query_tags'=> ['subject:(reserva OR confirmación OR billete OR itinerario) from:(iberia.es OR iberia.com) has:attachment filename:pdf'],
+        'gmail_query_tags'=> ['subject:(reserva OR confirmación OR billete OR itinerario) (from:iberia.es OR from:iberia.com) has:attachment filename:pdf',
+],
+
         'specific_keywords'=> ['Localizador:', 'PNR:', 'Código de reserva:']
     ],
 

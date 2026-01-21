@@ -1,4 +1,4 @@
-<?php
+<?php //app Services GmailService.php
 
 namespace App\Services;
 
@@ -173,9 +173,20 @@ class GmailService
             'subject'            => null,
             'date'               => null,
             'from'               => null,
+
+            // ✅ NUEVO: guardamos ambos
+            'body_text'          => '',
+            'body_html'          => '',
+
+            // ✅ compat: mantenemos 'body' (lo dejaremos como body_text al final)
             'body'               => '',
+
             'snippet'            => $message->getSnippet(),
             'adjuntos_pdf_texto' => [],
+
+            // ✅ internos (no los consumas fuera)
+            '_plain_parts'       => [],
+            '_html_parts'        => [],
         ];
 
         /*-----------------------------------------------
@@ -188,7 +199,11 @@ class GmailService
                 case 'From':    $emailData['from']    = $header->getValue(); break;
             }
         }
-        Log::debug("Cabeceras extraídas para {$messageId}", ['subject' => $emailData['subject'], 'from' => $emailData['from']]);
+
+        Log::debug("Cabeceras extraídas para {$messageId}", [
+            'subject' => $emailData['subject'],
+            'from'    => $emailData['from'],
+        ]);
 
         /*-----------------------------------------------
         | Procesar partes (recursivo)
@@ -196,15 +211,49 @@ class GmailService
         $partesRaiz = $payload->getParts() ?: [$payload];
         $this->processPartsRecursive($partesRaiz, $emailData, $messageId);
 
-        /* Limpieza final del cuerpo */
-        if (!empty($emailData['body'])) {
-            $emailData['body'] = trim(preg_replace('/\s+/', ' ', $emailData['body']));
+        /*-----------------------------------------------
+        | Ensamblado final de body_text / body_html
+        |-----------------------------------------------*/
+        $bodyText = trim(implode("\n", $emailData['_plain_parts'] ?? []));
+        $bodyHtml = trim(implode("\n", $emailData['_html_parts']  ?? []));
+
+        // ✅ si no hay text/plain, derivar texto desde HTML
+        if ($bodyText === '' && $bodyHtml !== '') {
+            $bodyText = $this->htmlToTextPreservingLines($bodyHtml);
         }
 
+        // ✅ defensa tamaño (pero SIN aplastar todo a una sola línea)
+        if ($bodyText !== '' && strlen($bodyText) > 2_000_000) {
+            $bodyText = substr($bodyText, 0, 2_000_000);
+            Log::warning("body_text truncado por tamaño excesivo en {$messageId} para evitar fallo de regex.");
+        }
+
+        if ($bodyHtml !== '' && strlen($bodyHtml) > 2_000_000) {
+            $bodyHtml = substr($bodyHtml, 0, 2_000_000);
+            Log::warning("body_html truncado por tamaño excesivo en {$messageId} para evitar fallo de regex.");
+        }
+
+        // ✅ normalizaciones suaves: mantener saltos de línea, solo limpiar CRLF repetidos
+        $bodyText = preg_replace("/\r\n|\r/", "\n", $bodyText);
+        $bodyText = preg_replace("/\n{3,}/", "\n\n", $bodyText);
+        $bodyText = trim($bodyText);
+
+        $emailData['body_text'] = $bodyText;
+        $emailData['body_html'] = $bodyHtml;
+
+        // ✅ compat: tu código antiguo usa content['body']
+        // lo dejamos igual que body_text para parsers que no miran body_text
+        $emailData['body'] = $bodyText;
+
+        // ✅ limpiar internos
+        unset($emailData['_plain_parts'], $emailData['_html_parts']);
+
         Log::info("✅ Finalizada extracción para {$messageId}", [
-            'subject'          => $emailData['subject'],
-            'body_found'       => !empty($emailData['body']),
-            'pdfs_extracted'   => count($emailData['adjuntos_pdf_texto']),
+            'subject'        => $emailData['subject'],
+            'from'           => $emailData['from'],
+            'body_text_len'  => mb_strlen($emailData['body_text']),
+            'body_text_head' => mb_substr($emailData['body_text'], 0, 160),
+            'pdfs_extracted' => count($emailData['adjuntos_pdf_texto']),
         ]);
 
         return $emailData;
@@ -212,7 +261,7 @@ class GmailService
 
     /**
      * Recorre todas las partes (y sub-partes) para:
-     * 1. Hallar el cuerpo principal
+     * 1. Acumular body_text y body_html (robusto)
      * 2. Detectar y extraer PDFs (adjuntos o inline) con validaciones reales
      * 3. Seguir bajando recursivamente
      * @param Gmail\MessagePart[] $parts
@@ -235,21 +284,28 @@ class GmailService
             ]);
 
             /*-------------------------------------------
-            | 1) Cuerpo principal (prioriza text/plain)
+            | 1) Cuerpo: acumular text/plain y text/html
             |-------------------------------------------*/
-            if (empty($emailData['body']) && $body && $body->getData()) {
+            if ($body && $body->getData()) {
+                $decoded = $this->decodeGoogleBody($body->getData());
+
                 if ($mimeType === 'text/plain') {
-                    $emailData['body'] = base64_decode(strtr($body->getData(), '-_', '+/'));
-                    Log::debug("Cuerpo 'text/plain' encontrado y asignado para {$messageId}.");
+                    $decoded = trim($decoded);
+                    if ($decoded !== '') {
+                        $emailData['_plain_parts'][] = $decoded;
+                        Log::debug("➕ Añadida parte text/plain para {$messageId} (" . strlen($decoded) . " bytes)");
+                    }
                 } elseif ($mimeType === 'text/html') {
-                    $html = base64_decode(strtr($body->getData(), '-_', '+/'));
-                    $emailData['body'] = strip_tags($html); // Asigna como fallback
-                    Log::debug("Cuerpo 'text/html' encontrado y asignado como fallback para {$messageId}.");
+                    $decoded = trim($decoded);
+                    if ($decoded !== '') {
+                        $emailData['_html_parts'][] = $decoded;
+                        Log::debug("➕ Añadida parte text/html para {$messageId} (" . strlen($decoded) . " bytes)");
+                    }
                 }
             }
 
             /*-------------------------------------------
-            | 2) Detección y extracción de PDF (robusta)
+            | 2) Detección y extracción de PDF (tu lógica)
             |-------------------------------------------*/
             $esPdf = $this->isRealPdfCandidate($mimeType, $filename);
 
@@ -261,49 +317,43 @@ class GmailService
                     if ($attachmentId) {
                         Log::debug("Intentando obtener PDF desde attachmentId: {$attachmentId}");
                         $attachment = $this->service->users_messages_attachments->get('me', $messageId, $attachmentId);
-                        $pdfRawData = base64_decode(strtr($attachment->getData(), '-_', '+/'));
+                        $pdfRawData = $this->decodeGoogleBody($attachment->getData());
                         Log::info("Datos de PDF adjunto recuperados para '{$filename}'");
                     } elseif ($body->getData()) {
                         Log::debug("Intentando obtener PDF inline (base64) directamente desde la parte.");
-                        $pdfRawData = base64_decode(strtr($body->getData(), '-_', '+/'));
+                        $pdfRawData = $this->decodeGoogleBody($body->getData());
                         Log::info("Datos de PDF inline recuperados para '{$filename}'");
                     }
 
                     if (!$pdfRawData) {
                         Log::warning("⚠️ Se detectó un PDF ('{$filename}') pero no se pudo recuperar su contenido binario en mensaje {$messageId}.");
-                        // No hay nada que parsear; continúa con la siguiente parte
                         goto descend;
                     }
 
-                    // 2.1 Denylist por extensión común mal etiquetada
+                    // Denylist por extensión común mal etiquetada
                     $lowerName = strtolower($filename ?? '');
                     $denyByExt = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.zip', '.rar', '.7z', '.xlsx', '.xls', '.csv', '.doc', '.docx'];
-                    $skipByExt = false;
                     foreach ($denyByExt as $ext) {
                         if ($lowerName && str_ends_with($lowerName, $ext)) {
-                            $skipByExt = true;
-                            break;
+                            Log::warning("Adjunto omitido por extensión no-PDF aunque venga como octet-stream: '{$filename}' en {$messageId}");
+                            goto descend;
                         }
                     }
-                    if ($skipByExt) {
-                        Log::warning("Adjunto omitido por extensión no-PDF aunque venga como octet-stream: '{$filename}' en {$messageId}");
-                        goto descend;
-                    }
 
-                    // 2.2 Límite de tamaño (defensa)
+                    // Límite de tamaño
                     $bytes = strlen($pdfRawData);
-                    if ($bytes > 20 * 1024 * 1024) { // 10MB
+                    if ($bytes > 20 * 1024 * 1024) {
                         Log::notice("PDF omitido por tamaño ({$bytes} bytes): '{$filename}' en {$messageId}");
                         goto descend;
                     }
 
-                    // 2.3 Validación de firma %PDF-
+                    // Firma PDF
                     if (!$this->hasPdfSignature($pdfRawData)) {
                         Log::warning("Adjunto con nombre/MIME de PDF pero sin firma %PDF-, se omite: '{$filename}' en {$messageId}");
                         goto descend;
                     }
 
-                    // 2.4 Parseo con Smalot (manejo de cifrados)
+                    // Parseo con Smalot
                     try {
                         $parser   = new \Smalot\PdfParser\Parser();
                         $document = $parser->parseContent($pdfRawData);
@@ -320,7 +370,6 @@ class GmailService
                         }
                     } catch (\Exception $e) {
                         $msg = $e->getMessage() ?? '';
-                        // Smalot no soporta PDFs protegidos/encifrados
                         if (stripos($msg, 'Secured pdf file') !== false || stripos($msg, 'Encrypted') !== false) {
                             $emailData['adjuntos_pdf_texto'][] = [
                                 'filename'       => $filename ?: 'adjunto.pdf',
@@ -394,7 +443,43 @@ class GmailService
         return str_contains($head, '%PDF-');
     }
 
+    /**
+     * Gmail usa base64url (- _) y a veces sin padding. Esto lo decodifica bien.
+     */
+    private function decodeGoogleBody(string $data): string
+    {
+        $data = strtr($data, '-_', '+/');
+        $pad = strlen($data) % 4;
+        if ($pad) {
+            $data .= str_repeat('=', 4 - $pad);
+        }
+
+        $decoded = base64_decode($data, true);
+        return $decoded === false ? '' : (string) $decoded;
+    }
     
+    /**
+     * Convierte HTML a texto manteniendo saltos (para que regex de PNR/itinerario funcione).
+     */
+    private function htmlToTextPreservingLines(string $html): string
+    {
+        $s = (string) $html;
+
+        // Mantener saltos ANTES de strip_tags
+        $s = preg_replace('~<\s*br\s*/?\s*>~i', "\n", $s);
+        $s = preg_replace('~</\s*(p|div|tr|li|h1|h2|h3|h4|h5|h6)\s*>~i', "\n", $s);
+        $s = preg_replace('~<\s*(p|div|tr|li)\b[^>]*>~i', "\n", $s);
+
+        $s = strip_tags($s);
+        $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        $s = preg_replace('/[ \t]+/', ' ', $s);
+        $s = preg_replace("/\r\n|\r/", "\n", $s);
+        $s = preg_replace("/\n{3,}/", "\n\n", $s);
+
+        return trim($s);
+    }
+
     private function getMessageBody(\Google\Service\Gmail\MessagePart $payload): string
     {
         $body = ''; $parts = $payload->getParts();
@@ -523,6 +608,7 @@ class GmailService
         foreach ($queries as $query) {
             try {
                 \Log::debug("Ejecutando query para {$this->email}: {$query}");
+
                 $optParams = [
                     'q' => $query,
                     'maxResults' => 50,
@@ -530,20 +616,28 @@ class GmailService
                 ];
 
                 $pageToken = null;
+
                 do {
-                    if ($pageToken) $optParams['pageToken'] = $pageToken;
+                    if ($pageToken) {
+                        $optParams['pageToken'] = $pageToken;
+                    }
 
                     $response = $this->service->users_messages->listUsersMessages('me', $optParams);
 
                     if ($response->getMessages()) {
                         foreach ($response->getMessages() as $message) {
                             $messageId = $message->getId();
-                            if (isset($processedMessageIds[$messageId])) continue;
+
+                            // Dedupe global (entre queries)
+                            if (isset($processedMessageIds[$messageId])) {
+                                continue;
+                            }
                             $processedMessageIds[$messageId] = true;
 
                             try {
                                 $fullMessage = $this->service->users_messages->get('me', $messageId, ['format' => 'FULL']);
                                 $extractedContentArray = $this->extractEmailContent($fullMessage);
+
                                 $emailsOutput[] = [
                                     'id'           => $messageId,
                                     'content'      => $extractedContentArray,
@@ -559,9 +653,33 @@ class GmailService
                 } while ($pageToken);
 
             } catch (\Google\Service\Exception $e) {
-                $errorDetails = json_decode($e->getMessage(), true);
-                \Log::error("Error de Google API para query '{$query}' / {$this->email}: " . ($errorDetails['error']['message'] ?? $e->getMessage()));
-                if ($e->getCode() == 401 || $e->getCode() == 403) throw $e;
+
+                $raw = $e->getMessage();
+                $decoded = json_decode($raw, true);
+
+                // A veces el SDK trae errores estructurados
+                $errors = method_exists($e, 'getErrors') ? $e->getErrors() : [];
+                $firstReason = $errors[0]['reason'] ?? null;
+
+                $isInvalidGrant =
+                    str_contains($raw, 'invalid_grant')
+                    || (is_array($decoded) && (($decoded['error'] ?? null) === 'invalid_grant'))
+                    || (is_array($decoded) && (($decoded['error_description'] ?? null) === 'Token has been expired or revoked.'))
+                    || (is_array($decoded) && (($decoded['error']['status'] ?? null) === 'UNAUTHENTICATED'))
+                    || ($firstReason === 'authError')
+                    || ($firstReason === 'invalid');
+
+                if ($isInvalidGrant) {
+                    \Log::error("❌ OAuth invalid_grant para {$this->email}. Reautoriza esta cuenta.");
+                    throw new \RuntimeException('OAUTH_INVALID_GRANT');
+                }
+
+                \Log::error("Error de Google API para query '{$query}' / {$this->email}: " . $raw);
+
+                if ($e->getCode() == 401 || $e->getCode() == 403) {
+                    throw $e;
+                }
+
             } catch (\Exception $e) {
                 \Log::error("Error general para query '{$query}' / {$this->email}: " . $e->getMessage());
             }
@@ -569,5 +687,6 @@ class GmailService
 
         return $emailsOutput;
     }
+
 
 }

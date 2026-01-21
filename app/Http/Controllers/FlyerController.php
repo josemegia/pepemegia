@@ -80,7 +80,9 @@ class FlyerController extends Controller
         $availableFormats = array_keys(config('flyer.formats'));
         if (!in_array($activeFormatName, $availableFormats))
             $activeFormatName = config('flyer.default_format'); // Revertir a default si el formato no existe
-
+        if ($activeFormatName === 'minimalist') 
+            $theme = config('flyer.themes.minimalist');
+        
         // Obtener la vista Blade asociada al formato activo
         $activeFormatView = config("flyer.formats.{$activeFormatName}.view");
 
@@ -115,8 +117,9 @@ class FlyerController extends Controller
             config('flyer.themes.default'),
             config("flyer.themes.{$activeThemeName}", [])
         );
-
         $activeFormatName = $data['format'] ?? config('flyer.default_format');
+        if ($activeFormatName === 'minimalist') 
+            $theme = config('flyer.themes.minimalist');
         $activeFormatView = config("flyer.formats.{$activeFormatName}.view");
 
         return view($activeFormatView, [
@@ -579,6 +582,8 @@ class FlyerController extends Controller
         );
 
         $activeFormatName = $data['format'] ?? config('flyer.default_format');
+        if ($activeFormatName === 'minimalist')
+            $theme = config('flyer.themes.minimalist');
         $activeFormatView = config("flyer.formats.{$activeFormatName}.view");
         
         return view($activeFormatView, [

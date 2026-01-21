@@ -100,6 +100,11 @@ return [
             'view' => 'flyer.formats.2026',
             'description' => 'Lo que viene.',
         ],
+        'bcn' => [
+            'name' => 'Diseño BCN',
+            'view' => 'flyer.formats.bcn',
+            'description' => 'Barcelona.',
+        ],
         'overlay' => [
             'name' => 'Dynamic Overlay',
             'view' => 'flyer.formats.overlay',
@@ -199,6 +204,19 @@ return [
                 'highlight_bg'       => 'bg-yellow-600',
                 'gradient_start_bg'  => 'bg-green-800',
                 'cta_button'         => 'bg-white text-green-800 hover:bg-gray-100',
+            ],
+        ],
+        
+        'minimalist' => [
+            'font_family_class' => 'font-[Comic_Neue]',
+            'font_link' => 'https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&display=swap',
+            'classes' => [
+                'gradient'           => 'from-gray-800 to-black',
+                'highlight_text'     => 'text-white',
+                'highlight_border'   => 'border-gray-500',
+                'highlight_bg'       => 'bg-gray-700',
+                'gradient_start_bg'  => 'bg-gray-900',
+                'cta_button'         => 'bg-white text-black hover:bg-gray-200',
             ],
         ],
     ],

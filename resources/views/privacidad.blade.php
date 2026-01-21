@@ -1,7 +1,7 @@
 {{-- resources/views/privacidad.blade.php --}}
 
 @php
-    use Illuminate\Support\Facades\App;
+    // use Illuminate\Support\Facades\App;
     // use Illuminate\Support\Facades\Auth; // Solo si lo usas en este archivo
     // use Illuminate\Support\Facades\Gate; // Solo si lo usas en este archivo
 

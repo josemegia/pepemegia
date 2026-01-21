@@ -8,19 +8,26 @@ use App\Services\Airlines;
 
 class AirlineDetectorService
 {
-
     public function parseFromMensaje(array $mensaje): ?array
     {
         $remitente = $this->extraerEmailReal($mensaje['content']['from'] ?? '');
         $subject   = $mensaje['content']['subject'] ?? '';
         $pdfs      = $mensaje['content']['adjuntos_pdf_texto'] ?? [];
-        $bodyText  = (string)($mensaje['content']['body_text'] ?? '');
+
+        $bodyText = (string) ($mensaje['content']['body_text'] ?? $mensaje['content']['body'] ?? '');
+        if ($bodyText !== '' && stripos($bodyText, '<html') !== false) {
+            $bodyText = html_entity_decode(strip_tags($bodyText));
+            $bodyText = preg_replace('/[ \t]+/', ' ', $bodyText);
+            $bodyText = preg_replace("/\n{2,}/", "\n", $bodyText);
+            $bodyText = trim($bodyText);
+        }
 
         Log::info('✈️ [AirlineDetector] Mensaje recibido', [
-            'from'   => $remitente,
-            'asunto' => $subject,
-            'pdfs'   => array_map(fn($p) => $p['filename'] ?? 'adjunto.pdf', $pdfs),
-            'has_body_text' => trim($bodyText) !== '',
+            'from'     => $remitente,
+            'asunto'   => $subject,
+            'pdfs'     => array_map(fn($p) => $p['filename'] ?? 'adjunto.pdf', $pdfs),
+            'body_len' => mb_strlen($bodyText),
+            'body_head'=> mb_substr($bodyText, 0, 120),
         ]);
 
         // Re-ordena candidatos PDF (ETKT/Itinerary primero, BP después, EMD al final)
@@ -33,7 +40,7 @@ class AirlineDetectorService
 
             $esRemitenteValido = in_array($remitente, array_map('strtolower', $info['senders'] ?? []));
             $esDominioValido   = collect($info['domains'] ?? [])->contains(
-                fn($d) => \Illuminate\Support\Str::contains($remitente, strtolower($d))
+                fn($d) => Str::contains($remitente, strtolower($d))
             );
             if (!($esRemitenteValido || $esDominioValido)) continue;
 
@@ -57,28 +64,44 @@ class AirlineDetectorService
                 }
 
                 // Saltar si huele a EMD por contenido
-                $isEmd = (bool)preg_match('/\b(electronic\s+miscellaneous\s+document|^emd\b)\b/i', $text);
-                if ($isEmd) {
+                if (preg_match('/\b(electronic\s+miscellaneous\s+document|^emd\b)\b/i', $text)) {
                     Log::info("📄 {$filename} (#{$idx}) detectado como EMD (contenido). Se omite.");
                     continue;
                 }
 
                 try {
-                    $parsed = \App\Services\Airlines::$clave($text);
+                    $raw = \App\Services\Airlines::$clave($text);
 
-                    if (empty($parsed)) {
+                    if (empty($raw)) {
                         Log::info("❌ {$filename} (#{$idx}) -> parser {$clave} devolvió null/vacío.");
                         continue;
                     }
-                    if (($parsed['tipo'] ?? '') === 'emd') {
+                    if (($raw['tipo'] ?? '') === 'emd') {
                         Log::info("📄 {$filename} (#{$idx}) detectado como EMD por el parser. Se omite.");
                         continue;
                     }
 
-                    $parsed = $this->postProcesarParsed($parsed, $filename);
-                    if (!empty($parsed)) {
+                    // ✅ Normaliza salida: si el parser devuelve lista, la convertimos en items válidos
+                    $items = [];
+
+                    if (isset($raw[0]) && is_array($raw[0])) {
+                        foreach ($raw as $one) {
+                            $ok = $this->postProcesarParsed($one, $filename);
+                            if ($ok) $items[] = $ok;
+                        }
+                    } else {
+                        $ok = $this->postProcesarParsed($raw, $filename);
+                        if ($ok) $items[] = $ok;
+                    }
+
+                    if (count($items) === 1) {
                         Log::info("✅ Parse exitoso con parser {$clave} usando {$filename}.");
-                        return $parsed;
+                        return $items[0]; // compat total
+                    }
+
+                    if (count($items) >= 2) {
+                        Log::info("✅ Parse multi-item con parser {$clave} usando {$filename}. Items: " . count($items));
+                        return ['items' => $items];
                     }
 
                     Log::info("❌ {$filename} (#{$idx}) produjo datos incompletos tras postproceso.");
@@ -87,17 +110,32 @@ class AirlineDetectorService
                 }
             }
 
-            // ✅ 2) Fallback por body_text con el MISMO parser (aunque no haya PDFs)
+            // ✅ 2) Fallback por body_text con el MISMO parser
             if (trim($bodyText) !== '') {
                 try {
-                    // Saltar si el cuerpo parece EMD
                     if (!preg_match('/\b(electronic\s+miscellaneous\s+document|^emd\b)\b/i', $bodyText)) {
-                        $parsed = \App\Services\Airlines::$clave($bodyText);
-                        if (!empty($parsed) && (($parsed['tipo'] ?? '') !== 'emd')) {
-                            $parsed = $this->postProcesarParsed($parsed, '[BODY]');
-                            if (!empty($parsed)) {
+                        $raw = \App\Services\Airlines::$clave($bodyText);
+
+                        if (!empty($raw) && (($raw['tipo'] ?? '') !== 'emd')) {
+                            $items = [];
+
+                            if (isset($raw[0]) && is_array($raw[0])) {
+                                foreach ($raw as $one) {
+                                    $ok = $this->postProcesarParsed($one, '[BODY]');
+                                    if ($ok) $items[] = $ok;
+                                }
+                            } else {
+                                $ok = $this->postProcesarParsed($raw, '[BODY]');
+                                if ($ok) $items[] = $ok;
+                            }
+
+                            if (count($items) === 1) {
                                 Log::info("✅ Parse exitoso con parser {$clave} usando body_text.");
-                                return $parsed;
+                                return $items[0];
+                            }
+                            if (count($items) >= 2) {
+                                Log::info("✅ Parse multi-item con parser {$clave} usando body_text. Items: " . count($items));
+                                return ['items' => $items];
                             }
                         } else {
                             Log::info("❌ body_text -> parser {$clave} devolvió null/EMD.");
@@ -111,65 +149,6 @@ class AirlineDetectorService
             }
 
             Log::warning("⚠️ Ningún insumo útil (no-EMD) para {$clave} en este mensaje.");
-            // seguimos por si otro airline matchea por dominio
-        }
-
-        // ✅ 3) Fallback genérico detectAndParse() sobre PDFs
-        Log::info('↩️ [AirlineDetector] Intentando fallback genérico detectAndParse() sobre los PDFs.');
-        foreach ($pdfs as $idx => $pdf) {
-            $filename = $pdf['filename'] ?? 'adjunto.pdf';
-            $text     = $pdf['content']  ?? '';
-
-            if (!is_string($text) || trim($text) === '') {
-                Log::notice("📄 [fallback] {$filename} (#{$idx}) sin texto legible. Omitido.");
-                continue;
-            }
-            if (preg_match('/\b(electronic\s+miscellaneous\s+document|^emd\b)\b/i', $text)) {
-                Log::info("📄 [fallback] {$filename} (#{$idx}) es EMD. Continuando.");
-                continue;
-            }
-
-            try {
-                $parsed = \App\Services\Airlines::detectAndParse($text);
-
-                if (empty($parsed) || (($parsed['tipo'] ?? '') === 'emd')) {
-                    Log::info("❌ [fallback] {$filename} (#{$idx}) -> detectAndParse null/EMD.");
-                    continue;
-                }
-
-                $parsed = $this->postProcesarParsed($parsed, $filename);
-                if (!empty($parsed)) {
-                    Log::info("✅ [fallback] Parse exitoso usando {$filename}.");
-                    return $parsed;
-                }
-
-                Log::info("❌ [fallback] {$filename} (#{$idx}) incompleto tras postproceso.");
-            } catch (\Throwable $e) {
-                Log::warning("⚠️ [fallback] excepción detectAndParse con {$filename}: " . $e->getMessage());
-            }
-        }
-
-        // ✅ 4) Fallback final: detectAndParse() sobre body_text
-        if (trim($bodyText) !== '') {
-            Log::info('↩️ [AirlineDetector] Fallback final detectAndParse() sobre body_text.');
-            try {
-                if (!preg_match('/\b(electronic\s+miscellaneous\s+document|^emd\b)\b/i', $bodyText)) {
-                    $parsed = \App\Services\Airlines::detectAndParse($bodyText);
-                    if (!empty($parsed) && (($parsed['tipo'] ?? '') !== 'emd')) {
-                        $parsed = $this->postProcesarParsed($parsed, '[BODY]');
-                        if (!empty($parsed)) {
-                            Log::info("✅ [fallback] Parse exitoso desde body_text.");
-                            return $parsed;
-                        }
-                    } else {
-                        Log::info("❌ [fallback] body_text -> detectAndParse null/EMD.");
-                    }
-                } else {
-                    Log::info("📄 [fallback] body_text detectado como EMD. Se omite.");
-                }
-            } catch (\Throwable $e) {
-                Log::warning("⚠️ [fallback] excepción detectAndParse (body_text): " . $e->getMessage());
-            }
         }
 
         Log::info('🛑 [AirlineDetector] No se pudo obtener una reserva válida.', [
@@ -225,17 +204,8 @@ class AirlineDetectorService
         return array_values(array_filter($pdfs, fn($p) => is_string($p['content'] ?? null) && trim($p['content']) !== ''));
     }
     
-    private function postProcesarParsed(array $parsed, string $sourceName)
+    private function postProcesarParsed(array $parsed, string $sourceName): ?array
     {
-        // Si el parser devolvió múltiples reservas, escoge la primera válida.
-        if (isset($parsed[0]) && is_array($parsed[0])) {
-            foreach ($parsed as $item) {
-                $ok = $this->postProcesarParsed($item, $sourceName);
-                if (!empty($ok)) return $ok;
-            }
-            return null;
-        }
-
         $reserva  = $parsed['reserva_data']  ?? null;
         $pasajero = $parsed['pasajero_data'] ?? null;
 
@@ -253,10 +223,13 @@ class AirlineDetectorService
         if (empty($pasajero['nombre_unificado']) && !empty($pasajero['nombre_original'])) {
             $n = preg_replace('/\s+/', ' ', trim($pasajero['nombre_original']));
             $parts = preg_split('/\s+/', $n);
+
             if (count($parts) >= 2) {
                 $first = array_shift($parts);
                 $last  = implode('', $parts);
-                $pasajero['nombre_unificado'] = ucfirst(mb_strtolower($last, 'UTF-8')) . ucfirst(mb_strtolower($first, 'UTF-8'));
+                $pasajero['nombre_unificado'] =
+                    ucfirst(mb_strtolower($last, 'UTF-8')) .
+                    ucfirst(mb_strtolower($first, 'UTF-8'));
             } else {
                 $pasajero['nombre_unificado'] = ucfirst(mb_strtolower($n, 'UTF-8'));
             }
@@ -273,7 +246,6 @@ class AirlineDetectorService
             return null;
         }
 
-        // Ensambla y devuelve
         return [
             'reserva_data'  => $reserva,
             'pasajero_data' => $pasajero,

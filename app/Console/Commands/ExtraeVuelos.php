@@ -1,4 +1,4 @@
-<?php
+<?php //app Console Commands ExtraVuelos.php
 
 namespace App\Console\Commands;
 
@@ -21,7 +21,7 @@ class ExtraeVuelos extends Command
     protected $signature = 'vuelos:extraer 
                             {--no-gemini : No utilizar Gemini como fallback}
                             {--email= : Cuenta específica de Gmail a procesar} 
-                            {--meses=12 : Meses hacia atrás para buscar correos} 
+                            {--meses= : Meses hacia atrás para buscar correos} 
                             {--dry-run : Muestra los datos sin guardarlos}
                             {--from= : Filtra por dirección o dominio del remitente}
                             {--subject= : Filtra por texto contenido en el asunto}
@@ -48,6 +48,9 @@ class ExtraeVuelos extends Command
 
         $desdeFecha = null;
         $hastaFecha = null;
+
+        // ✅ NUEVO: contador global para decidir si se actualiza ultima_ejecucion_vuelos.txt
+        $totalMensajesEncontrados = 0;
 
         // --- BLOQUE DE CÓDIGO DEFINITIVO ---
         // Prioridad 1: Usar fechas específicas si se proporciona --fecha-inicio O --fecha-fin
@@ -76,34 +79,52 @@ class ExtraeVuelos extends Command
                 $this->error('Alguna de las fechas proporcionadas no es válida. Usa el formato YYYY-MM-DD.');
                 return 1;
             }
+
         } else {
             $archivoFecha = Storage::disk('local')->path('ultima_ejecucion_vuelos.txt');
-            $this->info("\033[36m📂 Verificando archivo de última ejecución: {$archivoFecha}\033[0m"); // Cyan for checks
+            $this->info("\033[36m📂 Verificando archivo de última ejecución: {$archivoFecha}\033[0m");
 
-            if ($this->option('meses')) {
-                $desdeFecha = now()->subMonths((int) $this->option('meses'));
-                $this->info("\033[32m📅 Opción --meses activada. Forzando extracción desde hace {$this->option('meses')} meses: {$desdeFecha->toDateString()}\033[0m"); // Green for options applied
+            $mesesOpt = $this->option('meses');                 // string|null
+            $meses    = is_null($mesesOpt) ? 0 : (int) $mesesOpt; // 0 si NO se pasó explícitamente
+
+            if (!is_null($mesesOpt) && $meses > 0) {
+
+                $desdeFecha = now()->subMonths($meses)->startOfDay();
+                $hastaFecha = now()->endOfDay();
+
+                $this->info("\033[32m📅 Opción --meses activada explícitamente. Extrayendo desde hace {$meses} meses: {$desdeFecha->toDateString()}\033[0m");
+
             } elseif (file_exists($archivoFecha)) {
-                $this->info("\033[36m📄 Archivo de última ejecución encontrado. Leyendo contenido...\033[0m"); // Cyan for file operations
-                $contenido = trim(file_get_contents($archivoFecha));
-                try {
-                    $fechaRegistrada = \Carbon\Carbon::parse($contenido);
-                    if ($fechaRegistrada->isValid()) {
-                        $desdeFecha = $fechaRegistrada->copy()->subDay(); // seguridad
-                        $this->info("\033[32m📅 Última ejecución registrada válida: {$fechaRegistrada->toDateString()}. Usando fecha ajustada: {$desdeFecha->toDateString()}\033[0m"); // Green for valid data
-                    } else {
-                        throw new \Exception('Invalid date');
-                    }
-                } catch (\Exception $e) {
-                    $desdeFecha = now()->subMonths(36);
-                    $this->warn("\033[33m⚠️ Fecha inválida en archivo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m"); // Yellow for fallback/warning
-                }
-            } else {
-                $desdeFecha = now()->subMonths(36);
-                $this->info("\033[33m📅 No hay archivo previo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m"); // Yellow for fallback
-            }
-        }
 
+                $this->info("\033[36m📄 Archivo de última ejecución encontrado. Leyendo contenido...\033[0m");
+
+                try {
+                    $contenido = trim(file_get_contents($archivoFecha));
+                    $fechaRegistrada = \Carbon\Carbon::parse($contenido);
+
+                    $desdeFecha = $fechaRegistrada->copy()->subDay()->startOfDay(); // margen de seguridad
+                    $hastaFecha = now()->endOfDay();
+
+                    $this->info("\033[32m📅 Usando última ejecución registrada: {$fechaRegistrada->toDateString()} → desde {$desdeFecha->toDateString()}\033[0m");
+
+                } catch (\Exception $e) {
+
+                    $desdeFecha = now()->subMonths(36)->startOfDay();
+                    $hastaFecha = now()->endOfDay();
+
+                    $this->warn("\033[33m⚠️ Fecha inválida en archivo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m");
+                }
+
+            } else {
+
+                $desdeFecha = now()->subMonths(36)->startOfDay();
+                $hastaFecha = now()->endOfDay();
+
+                $this->info("\033[33m📅 No hay archivo previo. Usando fallback de 36 meses: {$desdeFecha->toDateString()}\033[0m");
+            }
+
+        }
+        
         $usersToProcess = [];
         if ($email = $this->option('email')) {
             $this->info("\033[32m📧 Opción --email activada. Procesando cuenta específica: {$email}\033[0m"); // Green for options
@@ -141,11 +162,15 @@ class ExtraeVuelos extends Command
             
             try {
                 $this->info("\033[36m🔌 Creando instancia de GmailService para el usuario...\033[0m");
-                $gmail = new GmailService($user); 
+                $gmail = new GmailService($user);
+
                 $this->info("\033[36m📥 Obteniendo correos de reservas desde {$desdeFecha->toDateString()}...\033[0m");
                 $mensajes = $gmail->getReservationEmailsDesde($desdeFecha, $hastaFecha, 'airline');
 
                 $this->info("\033[35m📩 Total de correos encontrados: " . count($mensajes) . "\033[0m");
+
+                // ✅ acumular para decidir si se actualiza el archivo de ultima ejecución
+                $totalMensajesEncontrados += count($mensajes);
 
                 foreach ($mensajes as $mensaje) {
                     $this->info("\033[36m──────────────✉️ Iniciando procesamiento del mensaje ID: {$mensaje['id']} ──────────────\033[0m");
@@ -172,19 +197,29 @@ class ExtraeVuelos extends Command
                     $this->info("\033[36m🔍 Intentando parsear datos desde el mensaje usando AirlineDetectorService...\033[0m");
                     $parsedData = app(AirlineDetectorService::class)->parseFromMensaje($mensaje);
 
-                    // 💡 Normalizar múltiples o único resultado
-                    $parsedList = [];
-                    if (isset($parsedData['reserva_data'])) {
-                        $parsedList[] = $parsedData;
-                    } elseif (is_array($parsedData) && isset($parsedData[0]['reserva_data'])) {
-                        $parsedList = $parsedData;
-                    } else {
-                        $parsedList[] = $parsedData;
+                    // ✅ Si no hay nada que guardar, pasamos al siguiente email
+                    if (empty($parsedData) || !is_array($parsedData)) {
+                        $this->warn("\033[33m⚠️ No se pudo extraer una reserva válida de este mensaje.\033[0m");
+                        continue;
                     }
 
+                    // ✅ Normaliza: el detector puede devolver ['items' => [...]] o un único item
+                    $parsedList = (isset($parsedData['items']) && is_array($parsedData['items']))
+                        ? $parsedData['items']
+                        : [$parsedData];
+
+
                     foreach ($parsedList as $parsed) {
-                        if (!$parsed) {
-                            $this->warn("\033[33m⚠️ Uno de los elementos del array está vacío. Saltando...\033[0m");
+
+                        // ✅ NUEVO: validar estructura mínima
+                        if (
+                            !is_array($parsed) ||
+                            empty($parsed['reserva_data']) ||
+                            empty($parsed['pasajero_data']) ||
+                            !is_array($parsed['reserva_data']) ||
+                            !is_array($parsed['pasajero_data'])
+                        ) {
+                            $this->warn("\033[33m⚠️ Item inválido (sin reserva_data/pasajero_data). Saltando...\033[0m");
                             continue;
                         }
 
@@ -196,40 +231,41 @@ class ExtraeVuelos extends Command
 
                         $this->info("\033[36m💾 Iniciando transacción de base de datos para guardar datos...\033[0m");
                         DB::beginTransaction();
+
                         try {
                             $pd = $parsed['pasajero_data'] ?? null;
                             $pasajero = null;
 
-                            if (!empty($pd['nombre_unificado'])) {
-                                $this->info("\033[35m👤 Datos de pasajero detectados. Nombre unificado: {$pd['nombre_unificado']}\033[0m");
-                                $nombreUnificado = $pd['nombre_unificado'];
-                                $nombreOriginal = $pd['nombre_original'] ?? null;
-
-                                $pasajero = Pasajero::where('nombre_unificado', $nombreUnificado)
-                                    ->orWhereJsonContains('variantes', $nombreOriginal)
-                                    ->first();
-
-                                if ($pasajero) {
-                                    $this->info("\033[32m🔄 Pasajero encontrado (ID: {$pasajero->id}).\033[0m");
-                                    if ($nombreOriginal && !in_array($nombreOriginal, $pasajero->variantes ?? [])) {
-                                        $variantes = $pasajero->variantes ?? [];
-                                        $variantes[] = $nombreOriginal;
-                                        $pasajero->variantes = array_values(array_unique($variantes));
-                                        $pasajero->save();
-                                        $this->info("\033[32m🧩 Variante añadida: {$nombreOriginal}\033[0m");
-                                    }
-                                } else {
-                                    $this->info("\033[32m🆕 Creando nuevo pasajero: {$nombreUnificado}\033[0m");
-                                    $pasajero = Pasajero::create([
-                                        'nombre_unificado' => $nombreUnificado,
-                                        'nombre_original' => $nombreOriginal,
-                                        'variantes' => [],
-                                    ]);
-                                }
-                            } else {
-                                $this->warn("\033[33m⚠️ Falta nombre_unificado. Revirtiendo...\033[0m");
+                            if (empty($pd['nombre_unificado'])) {
+                                $this->warn("\033[33m⚠️ Falta nombre_unificado. nombre_original=" . ($pd['nombre_original'] ?? 'NULL') . "\033[0m");
                                 DB::rollBack();
                                 continue;
+                            }
+
+                            $this->info("\033[35m👤 Datos de pasajero detectados. Nombre unificado: {$pd['nombre_unificado']}\033[0m");
+                            $nombreUnificado = $pd['nombre_unificado'];
+                            $nombreOriginal = $pd['nombre_original'] ?? null;
+
+                            $pasajero = Pasajero::where('nombre_unificado', $nombreUnificado)
+                                ->orWhereJsonContains('variantes', $nombreOriginal)
+                                ->first();
+
+                            if ($pasajero) {
+                                $this->info("\033[32m🔄 Pasajero encontrado (ID: {$pasajero->id}).\033[0m");
+                                if ($nombreOriginal && !in_array($nombreOriginal, $pasajero->variantes ?? [])) {
+                                    $variantes = $pasajero->variantes ?? [];
+                                    $variantes[] = $nombreOriginal;
+                                    $pasajero->variantes = array_values(array_unique($variantes));
+                                    $pasajero->save();
+                                    $this->info("\033[32m🧩 Variante añadida: {$nombreOriginal}\033[0m");
+                                }
+                            } else {
+                                $this->info("\033[32m🆕 Creando nuevo pasajero: {$nombreUnificado}\033[0m");
+                                $pasajero = Pasajero::create([
+                                    'nombre_unificado' => $nombreUnificado,
+                                    'nombre_original' => $nombreOriginal,
+                                    'variantes' => [],
+                                ]);
                             }
 
                             $reservaBase = $parsed['reserva_data'] ?? $parsed;
@@ -258,6 +294,7 @@ class ExtraeVuelos extends Command
 
                             DB::commit();
                             $this->info("\033[32m✅ Transacción confirmada.\033[0m");
+
                         } catch (\Exception $e) {
                             $this->error("\033[31m❌ Error al guardar reservas. Revirtiendo...\033[0m");
                             DB::rollBack();
@@ -269,19 +306,65 @@ class ExtraeVuelos extends Command
                             ]);
                         }
                     }
+                
                 }
-            } catch (\Exception $e) {
+            }
+            catch (\Google\Service\Exception $e) {
+                // ✅ Manejo claro de OAuth roto (invalid_grant / token revocado)
+                $raw = $e->getMessage();
+                $decoded = json_decode($raw, true);
+
+                $isInvalidGrant =
+                    str_contains($raw, 'invalid_grant')
+                    || (is_array($decoded) && (($decoded['error'] ?? null) === 'invalid_grant'))
+                    || (is_array($decoded) && (($decoded['error_description'] ?? null) === 'Token has been expired or revoked.'))
+                    || (is_array($decoded) && (($decoded['error']['status'] ?? null) === 'UNAUTHENTICATED'));
+
+                if ($isInvalidGrant) {
+                    $this->error("\033[31m❌ {$user->email}: Google OAuth inválido (token revocado/expirado). Reautoriza esta cuenta.\033[0m");
+                    Log::error("❌ OAuth invalid_grant para {$user->email}. Reautoriza esta cuenta.", [
+                        'email' => $user->email,
+                        'code' => $e->getCode(),
+                        'raw' => $raw,
+                    ]);
+                    // IMPORTANTÍSIMO: no seguimos con esta cuenta, pasamos al siguiente usuario
+                    continue;
+                }
+
+                $this->error("\033[31m❌ Error Google API para {$user->email} ({$e->getCode()}): {$raw}\033[0m");
+                Log::error("❌ Error Google API para {$user->email}", [
+                    'email' => $user->email,
+                    'code' => $e->getCode(),
+                    'raw' => $raw,
+                ]);
+
+                // En otros 401/403, también saltamos de cuenta para no spamear
+                if ($e->getCode() == 401 || $e->getCode() == 403) {
+                    continue;
+                }
+
+                // otros errores Google: seguimos con siguiente cuenta igualmente
+                continue;
+            }
+            catch (\Exception $e) {
                 $this->error("\033[31m❌ Error crítico al procesar la cuenta {$user->email}: {$e->getMessage()}\033[0m");
+                Log::error("❌ Error crítico al procesar cuenta", [
+                    'email' => $user->email,
+                    'exception' => $e->getMessage(),
+                    'trace' => Str::limit($e->getTraceAsString(), 2000),
+                ]);
+                continue;
             }
 
         }
-        
-        if (!$this->option('dry-run')) {
+
+        // ✅ CORRECCIÓN: solo actualizar si NO es dry-run y se encontró al menos 1 correo
+        if (!$this->option('dry-run') && $totalMensajesEncontrados > 0) {
             $this->info("\033[36m🗓️ Actualizando archivo de última ejecución con fecha actual: " . now()->toDateTimeString() . "\033[0m"); // Cyan for update
             Storage::disk('local')->put('ultima_ejecucion_vuelos.txt', now()->toDateTimeString());
             $this->info("\033[32m🗓️ Fecha de ejecución guardada exitosamente.\033[0m"); // Green for success
         } else {
-            $this->warn("\033[33m🧪 Modo DRY-RUN: No se actualiza el archivo de fecha de ejecución.\033[0m"); // Yellow for dry-run note
+            $this->warn("\033[33m🧪 No se actualiza ultima_ejecucion_vuelos.txt (dry-run o 0 correos encontrados).\033[0m");
         }
 
         $this->info("\033[32m🏁 Comando finalizado con éxito.\033[0m"); // Green for end
