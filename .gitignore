@@ -16,6 +16,7 @@
 /public/build
 /public/hot
 /public/storage
+/public/CASABOSQUE/*.mp4
 /python/venv
 /storage/framework
 /storage/app/private
