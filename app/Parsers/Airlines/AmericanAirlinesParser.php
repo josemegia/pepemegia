@@ -3,6 +3,8 @@
 namespace App\Parsers\Airlines;
 
 use Carbon\Carbon;
+use App\Models\AirportReference;
+
 
 class AmericanAirlinesParser
 {
@@ -16,60 +18,86 @@ class AmericanAirlinesParser
         $from = strtolower($fromEmail);
         $hayAA = str_contains($from, 'aa.com')
             || str_contains($from, 'info.email.aa.com')
-            || str_contains($from, 'email.aa.com');
+            || str_contains($from, 'email.aa.com')
+            || str_contains($from, 'americanairlines.com');
+
+        if (!$hayAA) return false;
 
         $text = self::normalize($subject . "\n" . $bodyText);
 
+        // Evita MFA / avisos genéricos: exige señales de itinerario/PNR/segmentos
         $hayConfirmacion = preg_match('/\b(c[oó]digo|codig)\s+de\s+confirmaci[oó]n\b/iu', $text) === 1
             || preg_match('/\brecord\s+locator\b/i', $text) === 1
-            || preg_match('/\bconfirmation\s+(?:code|number)\b/i', $text) === 1;
+            || preg_match('/\bconfirmation\s+(?:code|number)\b/i', $text) === 1
+            || preg_match('/\bPNR\b/i', $text) === 1;
 
         $hayVuelosAA = preg_match('/\bAA\s*\d{1,4}\b/i', $text) === 1;
 
-        return $hayAA && ($hayConfirmacion || $hayVuelosAA);
+        // al menos dos IATA conocidos (para distinguir de emails de cuenta)
+        $hayIatas = preg_match_all('/\b[A-Z]{3}\b/', $text) >= 2;
+
+        return $hayAA && ($hayConfirmacion || ($hayVuelosAA && $hayIatas));
     }
 
     /**
-     * @return array{
-     *   airline:string,
-     *   pnr:?string,
-     *   segments: array<int, array{
-     *     ciudad_origen:?string,
-     *     aeropuerto_origen_iata:?string,
-     *     ciudad_destino:?string,
-     *     aeropuerto_destino_iata:?string,
-     *     numero_vuelo:?string,
-     *     fecha_salida:?string,
-     *     hora_salida:?string,
-     *     terminal_salida:?string,
-     *     fecha_llegada:?string,
-     *     hora_llegada:?string,
-     *     terminal_llegada:?string,
-     *     clase_tarifa:?string,
-     *     franquicia_equipaje:?string,
-     *     estado:?string,
-     *     pais_origen:?string,
-     *     pais_destino:?string
-     *   }>
-     * }
+     * ✅ DEVUELVE MULTI-ITEM COMPATIBLE CON AirlineDetectorService
      */
     public static function parse(string $bodyText): array
     {
         $text = self::normalize($bodyText);
 
         $pnr = self::extractPnr($text);
-        $segments = self::extractSegments($text);
+        if (!$pnr) return [];
 
-        return [
-            'airline' => self::key(),
-            'pnr' => $pnr,
-            'segments' => $segments,
-        ];
+        $segments = self::extractSegmentsAaEmail($text);
+        if (empty($segments)) return [];
+
+        $paxNames = self::extractPassengers($text);
+        if (empty($paxNames)) {
+            // fallback 2 (por si AA cambia “Nuevo boleto”)
+            $paxNames = self::extractPassengersFallback($text);
+        }
+
+        // Si aun así no hay pasajeros, devolvemos 1 item mínimo (para no perder la reserva)
+        // El detector construirá nombre_unificado desde nombre_original; así que ponemos algo no vacío.
+        if (empty($paxNames)) {
+            $paxNames = ['Passenger'];
+        }
+
+        $items = [];
+        foreach ($paxNames as $name) {
+            $items[] = [
+                'reserva_data' => [
+                    'aerolinea'      => self::key(),
+                    'numero_reserva' => $pnr,
+                    'datos_adicionales' => [
+                        'segmentos_vuelo' => $segments,
+                    ],
+                ],
+                'pasajero_data' => [
+                    'nombre_original'  => $name,
+                    'nombre_unificado' => null,
+                ],
+
+                // (Opcional) formato simple por si lo consumes en otro sitio:
+                'passenger_name' => $name,
+                'pnr' => $pnr,
+                'segments' => array_map(fn ($seg) => [
+                    'from'          => $seg['from'],
+                    'to'            => $seg['to'],
+                    'flight_number' => $seg['flight_number'],
+                    'departure'     => $seg['departure'],
+                    'arrival'       => $seg['arrival'],
+                ], $segments),
+            ];
+        }
+
+        return $items;
     }
 
     private static function normalize(string $s): string
     {
-        // Preservar estructura si viene HTML
+        // Si viniera HTML real, respeta saltos
         if (stripos($s, '<') !== false) {
             $s = preg_replace('/<\s*br\s*\/?>/i', "\n", $s);
             $s = preg_replace('/<\/\s*(p|div|tr|li|h1|h2|h3|h4|h5|h6)\s*>/i', "\n", $s);
@@ -79,8 +107,14 @@ class AmericanAirlinesParser
         $s = strip_tags($s);
         $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
-        $s = preg_replace('/[ \t]+/u', ' ', $s);
+        // NBSP y tabs como espacio normal
+        $s = preg_replace('/[ \t\x{00A0}]+/u', ' ', $s);
         $s = preg_replace('/\r\n|\r/u', "\n", $s);
+
+        // borra líneas que son solo espacios
+        $s = preg_replace('/^[ \t]+$/m', '', $s);
+
+        // colapsa saltos
         $s = preg_replace('/\n{2,}/u', "\n", $s);
 
         return trim($s);
@@ -94,8 +128,9 @@ class AmericanAirlinesParser
             '/\bconfirmation\s*(?:code|number)\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/i',
             '/\bbooking\s*reference\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/i',
             '/\blocator\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/i',
+            '/\bPNR\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/i',
 
-            // Español (tildes / encoding raro)
+            // Español
             '/\b(c[oó]digo|codig)\s*de\s*(confirmaci[oó]n|reserva|referencia)\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/iu',
             '/\b(localizador|c[oó]digo)\b[^A-Z0-9]*([A-Z0-9]{5,7})\b/iu',
         ];
@@ -103,145 +138,185 @@ class AmericanAirlinesParser
         foreach ($patterns as $p) {
             if (preg_match($p, $s, $m)) {
                 $code = strtoupper(trim(end($m)));
-                if (preg_match('/^[A-Z0-9]{5,7}$/', $code)) {
-                    return $code;
-                }
+                if (preg_match('/^[A-Z0-9]{5,7}$/', $code)) return $code;
             }
         }
 
-        // Fallback: “... - ABC123”
+        // fallback “... - ABC123”
         if (preg_match('/\s-\s*([A-Z0-9]{5,7})\b/', $s, $m)) {
             $code = strtoupper(trim($m[1]));
-            if (preg_match('/^[A-Z0-9]{5,7}$/', $code)) {
-                return $code;
-            }
-        }
-
-        // Último fallback (prudente)
-        if (preg_match_all('/\b([A-Z0-9]{5,7})\b/', $s, $mm)) {
-            foreach ($mm[1] as $cand) {
-                $cand = strtoupper($cand);
-                if (in_array($cand, ['AMERICAN', 'AIRLINES'], true)) {
-                    continue;
-                }
-                return $cand;
-            }
+            if (preg_match('/^[A-Z0-9]{5,7}$/', $code)) return $code;
         }
 
         return null;
     }
 
-    private static function extractSegments(string $s): array
+    /**
+     * ✅ Pasajeros: tu estrategia “Nuevo boleto” (funciona con tu email real)
+     */
+    private static function extractPassengers(string $s): array
     {
-        $segmentos = [];
-        $lines = preg_split('/\n/', $s);
+        $lines = array_map('trim', preg_split('/\n/', $s));
+        $names = [];
 
-        // 1) Intento “clásico”: línea con origen/destino
-        foreach ($lines as $idx => $line) {
-            $lineClean = trim($line);
-            if ($lineClean === '') {
-                continue;
+        for ($i = 0; $i < count($lines); $i++) {
+            $line = $lines[$i] ?? '';
+            if (!preg_match('/\b(Nuevo\s+boleto|New\s+ticket)\b/i', $line)) continue;
+
+            $parts = [];
+            $lookBack = 120;
+
+            for ($j = $i - 1; $j >= 0 && $j >= ($i - $lookBack); $j--) {
+                $l = trim($lines[$j] ?? '');
+                if ($l === '') {
+                    if (!empty($parts)) break;
+                    continue;
+                }
+
+                // Cortes típicos (cuando ya hemos pasado la zona del nombre)
+                if (preg_match('/\b(Su compra|Your purchase|Costo total|Total pagado|Su pago|Impuestos)\b/iu', $l)) {
+                    if (!empty($parts)) break;
+                    continue;
+                }
+
+                // Evitar líneas con montos/tickets
+                if (preg_match('/\d/', $l) || str_contains($l, '$')) {
+                    if (!empty($parts)) break;
+                    continue;
+                }
+
+                if (preg_match('/^[A-Za-zÁÉÍÓÚÑáéíóúñüÜ\.\'\- ]{2,}$/u', $l)) {
+                    array_unshift($parts, $l);
+                    continue;
+                }
+
+                if (!empty($parts)) break;
             }
 
-            // Ej: "BOG to SLC" / "BOG - SLC" / "BOG → SLC"
-            if (!preg_match('/\b([A-Z]{3})\b\s*(?:to|a|-|→)\s*\b([A-Z]{3})\b/i', $lineClean, $m)) {
+            $name = trim(preg_replace('/\s+/u', ' ', implode(' ', $parts)));
+            if ($name !== '') $names[] = $name;
+        }
+
+        return self::uniqueStrings($names);
+    }
+
+    /**
+     * ✅ Fallback: si AA cambia la sección de tickets
+     */
+    private static function extractPassengersFallback(string $s): array
+    {
+        $lines = array_map('trim', preg_split('/\n/', $s));
+        $names = [];
+
+        // Busca bloques cerca de “Passenger/Pasajero/Traveler”
+        for ($i = 0; $i < count($lines); $i++) {
+            $l = $lines[$i] ?? '';
+            if (!preg_match('/\b(Passenger|Pasajero|Traveler)\b/i', $l)) continue;
+
+            for ($j = $i + 1; $j < min(count($lines), $i + 12); $j++) {
+                $cand = trim($lines[$j] ?? '');
+                if ($cand === '') continue;
+                if (preg_match('/\d/', $cand)) break;
+
+                // Nombre razonable: 2-5 palabras
+                if (preg_match('/^[A-Za-zÁÉÍÓÚÑáéíóúñüÜ\.\'\-]+(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñüÜ\.\'\-]+){1,4}$/u', $cand)) {
+                    $names[] = $cand;
+                }
+            }
+        }
+
+        return self::uniqueStrings($names);
+    }
+
+    /**
+     * ✅ Segmentos: robusto para el formato AA de email (como tu adjunto)
+     *
+     * Estructura típica:
+     * Tue, 7 de Apr de 2026
+     * BOG
+     * Bogota
+     * 12:25 AM
+     * AA 1122
+     * DFW
+     * Dallas/Fort Worth
+     * 6:26 AM
+     */
+    private static function extractSegmentsAaEmail(string $s): array
+    {
+        $lines = array_values(array_filter(
+            array_map('trim', preg_split('/\n/', $s)),
+            fn ($l) => $l !== ''
+        ));
+
+        // Contexto de fecha por índice
+        $dateByIdx = [];
+        $currentDate = null;
+        foreach ($lines as $i => $l) {
+            $d = self::extractDate($l);
+            if ($d) $currentDate = $d;
+            $dateByIdx[$i] = $currentDate;
+        }
+
+        $segments = [];
+
+        for ($i = 0; $i < count($lines); $i++) {
+            $flight = self::extractFlightNumber($lines[$i] ?? '');
+            if (!$flight) continue;
+
+            $date = $dateByIdx[$i] ?? null;
+            if (!$date) continue;
+
+            // Origen: último IATA antes del vuelo
+            $orig = self::findIataBefore($lines, $i, 50);
+            // Hora salida: última hora antes del vuelo
+            $depTime = self::findTimeBefore($lines, $i, 50);
+
+            // Destino: primer IATA después del vuelo
+            $dest = self::findIataAfter($lines, $i, 50);
+            // Hora llegada: primera hora después del vuelo
+            $arrTime = self::findTimeAfter($lines, $i, 50);
+
+            if (!$orig || !$dest || !$depTime || !$arrTime) continue;
+
+            try {
+                $depDT = Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $depTime);
+                $arrDT = Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $arrTime);
+                if ($arrDT->lt($depDT)) $arrDT->addDay();
+
+                $departureIso = $depDT->format('Y-m-d\TH:i:s');
+                $arrivalIso   = $arrDT->format('Y-m-d\TH:i:s');
+            } catch (\Throwable $e) {
                 continue;
             }
-
-            $orig = strtoupper($m[1]);
-            $dest = strtoupper($m[2]);
 
             $paisOrig = self::getCountryFromIata($orig);
             $paisDest = self::getCountryFromIata($dest);
 
-            // si no reconocemos ninguno, probablemente no es segmento real
-            if (!$paisOrig && !$paisDest) {
-                continue;
-            }
+            $segments[] = [
+                'from'          => $orig,
+                'to'            => $dest,
+                'flight_number' => $flight,
+                'departure'     => $departureIso,
+                'arrival'       => $arrivalIso,
 
-            $fecha = self::extractDateFromWindow($lines, $idx, 4) ?? self::extractDate($lineClean);
-
-            $segment = [
-                'ciudad_origen' => null,
-                'aeropuerto_origen_iata' => $orig,
-                'ciudad_destino' => null,
+                // campos extra por si luego lo usas
+                'aeropuerto_origen_iata'  => $orig,
                 'aeropuerto_destino_iata' => $dest,
-                'numero_vuelo' => self::extractFlightNumber($lineClean),
-                'fecha_salida' => $fecha,
-                'hora_salida' => self::extractTime($lineClean),
-                'terminal_salida' => null,
-                'fecha_llegada' => null,
-                'hora_llegada' => null,
-                'terminal_llegada' => null,
-                'clase_tarifa' => null,
-                'franquicia_equipaje' => null,
-                'estado' => null,
-                'pais_origen' => $paisOrig,
+                'numero_vuelo'            => $flight,
+                'fecha_salida'            => substr($departureIso, 0, 10),
+                'hora_salida'             => substr($departureIso, 11, 5),
+                'fecha_llegada'           => substr($arrivalIso, 0, 10),
+                'hora_llegada'            => substr($arrivalIso, 11, 5),
+                'pais_origen'  => $paisOrig,
                 'pais_destino' => $paisDest,
             ];
-
-            if ($segment['aeropuerto_origen_iata'] && $segment['aeropuerto_destino_iata'] && $segment['fecha_salida']) {
-                $segmentos[] = $segment;
-            }
         }
 
-        // 2) Fallback robusto: IATA sueltos en emails AA (BOG \n SLC)
-        if (empty($segmentos)) {
-            $all = [];
-            if (preg_match_all('/\b([A-Z]{3})\b/', $s, $mm)) {
-                foreach ($mm[1] as $code) {
-                    $code = strtoupper($code);
-                    $country = self::getCountryFromIata($code);
-                    if ($country) {
-                        $all[] = $code;
-                    }
-                }
-            }
-
-            // dedupe consecutivo
-            $seq = [];
-            foreach ($all as $c) {
-                if (empty($seq) || end($seq) !== $c) {
-                    $seq[] = $c;
-                }
-            }
-
-            for ($i = 0; $i < count($seq) - 1; $i++) {
-                $orig = $seq[$i];
-                $dest = $seq[$i + 1];
-                if ($orig === $dest) {
-                    continue;
-                }
-
-                $segmentos[] = [
-                    'ciudad_origen' => null,
-                    'aeropuerto_origen_iata' => $orig,
-                    'ciudad_destino' => null,
-                    'aeropuerto_destino_iata' => $dest,
-                    'numero_vuelo' => null,
-                    // Si no hay fecha real, ponemos hoy para que tu pipeline no falle.
-                    // (Luego en PASO 2 lo haremos bien: extraer fecha real del email AA.)
-                    'fecha_salida' => Carbon::now()->format('Y-m-d'),
-                    'hora_salida' => null,
-                    'terminal_salida' => null,
-                    'fecha_llegada' => null,
-                    'hora_llegada' => null,
-                    'terminal_llegada' => null,
-                    'clase_tarifa' => null,
-                    'franquicia_equipaje' => null,
-                    'estado' => null,
-                    'pais_origen' => self::getCountryFromIata($orig),
-                    'pais_destino' => self::getCountryFromIata($dest),
-                ];
-            }
-        }
-
-        return self::uniqueSegments($segmentos);
+        return self::uniqueSegmentsSimple($segments);
     }
 
     private static function extractFlightNumber(string $s): ?string
     {
-        // "AA 123" / "AA123"
         if (preg_match('/\bAA\s*([0-9]{1,4})\b/i', $s, $m)) {
             return 'AA' . $m[1];
         }
@@ -250,13 +325,16 @@ class AmericanAirlinesParser
 
     private static function extractTime(string $s): ?string
     {
-        // 13:45 o 1:45 PM
-        if (preg_match('/\b([01]?\d|2[0-3]):([0-5]\d)\b/', $s, $m)) {
-            return sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
+        // 12:25 AM / 6:26 PM (prioridad)
+        if (preg_match('/\b([1-9]|1[0-2]):([0-5]\d)\s*(AM|PM|A\.?\s*M\.?|P\.?\s*M\.?)\b/i', $s, $m)) {
+            $ampm = strtoupper($m[3]);
+            $ampm = str_replace(['.', ' '], '', $ampm);
+            return self::normalizeTime($m[1] . ':' . $m[2], $ampm);
         }
 
-        if (preg_match('/\b([1-9]|1[0-2]):([0-5]\d)\s*(AM|PM)\b/i', $s, $m)) {
-            return self::normalizeTime($m[1] . ':' . $m[2], $m[3]);
+        // 24h
+        if (preg_match('/\b([01]?\d|2[0-3]):([0-5]\d)\b/', $s, $m)) {
+            return sprintf('%02d:%02d', (int)$m[1], (int)$m[2]);
         }
 
         return null;
@@ -265,8 +343,7 @@ class AmericanAirlinesParser
     private static function normalizeTime(string $hhmm, string $ampm): ?string
     {
         try {
-            $ampm = strtoupper(trim($ampm));
-            $dt = Carbon::createFromFormat('g:i A', trim($hhmm) . ' ' . $ampm);
+            $dt = Carbon::createFromFormat('g:i A', trim($hhmm) . ' ' . strtoupper($ampm));
             return $dt->format('H:i');
         } catch (\Throwable $e) {
             return null;
@@ -280,12 +357,12 @@ class AmericanAirlinesParser
             return "{$m[1]}-{$m[2]}-{$m[3]}";
         }
 
-        // DD/MM/YYYY o DD-MM-YYYY
+        // DD/MM/YYYY
         if (preg_match('/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d{2})\b/', $s, $m)) {
             return Carbon::createFromDate((int)$m[3], (int)$m[2], (int)$m[1])->format('Y-m-d');
         }
 
-        // “Tue, 7 de Apr de 2026”
+        // Tue, 7 de Apr de 2026
         if (preg_match('/\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s*,?\s*([0-9]{1,2})\s+de\s+([A-Za-z]{3,})\s+de\s+([0-9]{4})\b/i', $s, $m)) {
             $day = (int)$m[1];
             $month = self::monthToNumber($m[2]);
@@ -300,20 +377,6 @@ class AmericanAirlinesParser
         }
 
         return null;
-    }
-
-    private static function extractDateFromWindow(array $lines, int $idx, int $radius): ?string
-    {
-        $start = max(0, $idx - $radius);
-        $end = min(count($lines) - 1, $idx + $radius);
-
-        $window = [];
-        for ($i = $start; $i <= $end; $i++) {
-            $window[] = $lines[$i];
-        }
-        $txt = implode("\n", $window);
-
-        return self::extractDate($txt);
     }
 
     private static function monthToNumber(string $mon): ?int
@@ -333,7 +396,6 @@ class AmericanAirlinesParser
             'nov' => 11, 'november' => 11,
             'dec' => 12, 'december' => 12,
 
-            // Español
             'ene' => 1, 'enero' => 1,
             'febrero' => 2,
             'marzo' => 3,
@@ -349,50 +411,73 @@ class AmericanAirlinesParser
         ];
 
         $m3 = substr($m, 0, 3);
-
         return $map[$m] ?? $map[$m3] ?? null;
     }
 
-    /**
-     * Mini-mapa pragmático. Amplíalo cuando quieras.
-     * Devuelve null si no lo reconocemos.
-     */
-    private static function getCountryFromIata(string $iata): ?string
+    private static function findIataBefore(array $lines, int $idx, int $maxSteps): ?string
     {
-        $iata = strtoupper(trim($iata));
+        $steps = 0;
+        for ($i = $idx; $i >= 0 && $steps < $maxSteps; $i--, $steps++) {
+            $l = trim($lines[$i] ?? '');
+            if ($l === '') continue;
 
-        $map = [
-            // Colombia
-            'BOG' => 'CO',
-            'MDE' => 'CO',
-            'CLO' => 'CO',
+            if (preg_match('/^[A-Z]{3}$/', $l)) return $l;
 
-            // USA
-            'SLC' => 'US',
-            'MIA' => 'US',
-            'JFK' => 'US',
-            'LAX' => 'US',
-            'DFW' => 'US',
-            'ORD' => 'US',
-        ];
-
-        return $map[$iata] ?? null;
+            if (preg_match_all('/\b([A-Z]{3})\b/', $l, $mm) && !empty($mm[1])) {
+                return strtoupper(end($mm[1]));
+            }
+        }
+        return null;
     }
 
-    private static function uniqueSegments(array $segments): array
+    private static function findIataAfter(array $lines, int $idx, int $maxSteps): ?string
+    {
+        $steps = 0;
+        for ($i = $idx; $i < count($lines) && $steps < $maxSteps; $i++, $steps++) {
+            $l = trim($lines[$i] ?? '');
+            if ($l === '') continue;
+
+            if (preg_match('/^[A-Z]{3}$/', $l)) return $l;
+
+            if (preg_match_all('/\b([A-Z]{3})\b/', $l, $mm) && !empty($mm[1])) {
+                return strtoupper($mm[1][0]); // el primero “después” suele ser el destino
+            }
+        }
+        return null;
+    }
+
+    private static function findTimeBefore(array $lines, int $idx, int $maxSteps): ?string
+    {
+        $steps = 0;
+        for ($i = $idx; $i >= 0 && $steps < $maxSteps; $i--, $steps++) {
+            $t = self::extractTime($lines[$i] ?? '');
+            if ($t) return $t;
+        }
+        return null;
+    }
+
+    private static function findTimeAfter(array $lines, int $idx, int $maxSteps): ?string
+    {
+        $steps = 0;
+        for ($i = $idx; $i < count($lines) && $steps < $maxSteps; $i++, $steps++) {
+            $t = self::extractTime($lines[$i] ?? '');
+            if ($t) return $t;
+        }
+        return null;
+    }
+
+    private static function uniqueSegmentsSimple(array $segments): array
     {
         $seen = [];
         $out = [];
 
         foreach ($segments as $s) {
             $k = implode('|', [
-                $s['numero_vuelo'] ?? '',
-                $s['aeropuerto_origen_iata'] ?? '',
-                $s['aeropuerto_destino_iata'] ?? '',
-                $s['fecha_salida'] ?? '',
-                $s['hora_salida'] ?? '',
+                $s['flight_number'] ?? '',
+                $s['from'] ?? '',
+                $s['to'] ?? '',
+                $s['departure'] ?? '',
             ]);
-
             if (!isset($seen[$k])) {
                 $seen[$k] = true;
                 $out[] = $s;
@@ -401,4 +486,36 @@ class AmericanAirlinesParser
 
         return $out;
     }
+
+    private static function uniqueStrings(array $items): array
+    {
+        $out = [];
+        $seen = [];
+        foreach ($items as $n) {
+            $n = trim(preg_replace('/\s+/u', ' ', (string)$n));
+            if ($n === '') continue;
+            $k = mb_strtolower($n, 'UTF-8');
+            if (!isset($seen[$k])) {
+                $seen[$k] = true;
+                $out[] = $n;
+            }
+        }
+        return $out;
+    }
+
+    private static function getCountryFromIata(?string $iataCode): ?string
+    {
+        if (empty($iataCode)) return null;
+
+        try {
+            $ref = AirportReference::where('identifier_type', 'iata')
+                ->where('identifier_value', strtoupper($iataCode))
+                ->first();
+
+            return $ref ? $ref->country_name : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
 }

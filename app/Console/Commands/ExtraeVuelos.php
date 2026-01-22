@@ -184,6 +184,29 @@ class ExtraeVuelos extends Command
                     $this->info("\033[35m📝 Asunto del mensaje: {$asunto}\033[0m");
                     $this->info("\033[35m📎 Número de PDFs adjuntos: " . count($pdfs) . "\033[0m");
 
+
+
+
+
+
+
+    if (str_contains($remitente, 'info.email.aa.com')) {
+        
+        $this->info("\033[36m✉️ Detectado correo de American Airlines! Guardando cuerpo original...\033[0m");
+
+        // CREAR NOMBRE DE ARCHIVO ÚNICO BASADO EN EL ID DEL MENSAJE
+        $fileName = "email_aa_{$mensaje['id']}.txt";
+
+        // GUARDAR EL CUERPO DEL MENSAJE
+        Storage::disk('local')->put("emails_aa/{$fileName}", $body);
+
+        $this->info("\033[32m✅ Cuerpo del correo guardado en {$fileName}.\033[0m");
+    }
+
+
+
+
+
                     if ($filterFrom && !str_contains(strtolower($remitente), $filterFrom)) {
                         $this->line("\033[33m⏭️ Mensaje omitido por filtro --from: No coincide con {$remitente}\033[0m");
                         continue;
