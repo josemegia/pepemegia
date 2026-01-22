@@ -88,6 +88,8 @@ class AmericanAirlinesParser
                     'flight_number' => $seg['flight_number'],
                     'departure'     => $seg['departure'],
                     'arrival'       => $seg['arrival'],
+                    'ciudad_origen' => $seg['ciudad_origen'] ?? null,
+                    'ciudad_destino'=> $seg['ciudad_destino'] ?? null,
                 ], $segments),
             ];
         }
@@ -278,6 +280,10 @@ class AmericanAirlinesParser
 
             if (!$orig || !$dest || !$depTime || !$arrTime) continue;
 
+            // CIUDADES: intenta obtener ciudad desde el body (línea cercana), si no falla a lookup
+            $ciudadOrig = self::findCityBefore($lines, $i, 6) ?? self::getCityFromIata($orig);
+            $ciudadDest = self::findCityAfter($lines, $i, 6) ?? self::getCityFromIata($dest);
+
             try {
                 $depDT = Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $depTime);
                 $arrDT = Carbon::createFromFormat('Y-m-d H:i', $date . ' ' . $arrTime);
@@ -309,6 +315,8 @@ class AmericanAirlinesParser
                 'hora_llegada'            => substr($arrivalIso, 11, 5),
                 'pais_origen'  => $paisOrig,
                 'pais_destino' => $paisDest,
+                'ciudad_origen' => $ciudadOrig,
+                'ciudad_destino'=> $ciudadDest,
             ];
         }
 
@@ -466,6 +474,55 @@ class AmericanAirlinesParser
         return null;
     }
 
+    /**
+     * Busca una línea «ciudad» antes del índice (p.ej. "Bogota", "Dallas/Fort Worth")
+     * Reglas:
+     *  - no debe contener dígitos
+     *  - longitud razonable
+     *  - permitir letras/acentos/slash/comma/point/hyphen
+     *  - evita etiquetas obvias como "Asiento", "Clase", "Código"
+     */
+    private static function findCityBefore(array $lines, int $idx, int $maxSteps): ?string
+    {
+        $steps = 0;
+        for ($i = $idx - 1; $i >= 0 && $steps < $maxSteps; $i--, $steps++) {
+            $l = trim($lines[$i] ?? '');
+            if ($l === '') continue;
+
+            // evita que tomemos IATA o cosas con dígitos/horas/monedas/etiquetas
+            if (preg_match('/\d/', $l)) continue;
+            if (preg_match('/\b(Asiento|Clase|Seat|Class|Código|Code|Emitido|Emitido:|Emitido)\b/i', $l)) continue;
+            if (preg_match('/\b(AM|PM|A\.M\.|P\.M\.|AM\.)\b/i', $l)) continue;
+
+            // ciudad razonable: letras/acentos/espacios/slash/comma/point/hyphen
+            if (preg_match('/^[A-Za-zÁÉÍÓÚÑáéíóúñüÜ0-9\-\s\/\.\,]{2,80}$/u', $l)) {
+                // evita coger cosas como "BOG" (IATA) que sean 3 letras mayúsculas
+                if (preg_match('/^[A-Z]{3}$/', $l)) continue;
+                return $l;
+            }
+        }
+        return null;
+    }
+
+    private static function findCityAfter(array $lines, int $idx, int $maxSteps): ?string
+    {
+        $steps = 0;
+        for ($i = $idx + 1; $i < count($lines) && $steps < $maxSteps; $i++, $steps++) {
+            $l = trim($lines[$i] ?? '');
+            if ($l === '') continue;
+
+            if (preg_match('/\d/', $l)) continue;
+            if (preg_match('/\b(Asiento|Clase|Seat|Class|Código|Code|Emitido|Emitido:|Emitido)\b/i', $l)) continue;
+            if (preg_match('/\b(AM|PM|A\.M\.|P\.M\.|AM\.)\b/i', $l)) continue;
+
+            if (preg_match('/^[A-Za-zÁÉÍÓÚÑáéíóúñüÜ0-9\-\s\/\.\,]{2,80}$/u', $l)) {
+                if (preg_match('/^[A-Z]{3}$/', $l)) continue;
+                return $l;
+            }
+        }
+        return null;
+    }
+
     private static function uniqueSegmentsSimple(array $segments): array
     {
         $seen = [];
@@ -513,6 +570,21 @@ class AmericanAirlinesParser
                 ->first();
 
             return $ref ? $ref->country_name : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private static function getCityFromIata(?string $iataCode): ?string
+    {
+        if (empty($iataCode)) return null;
+
+        try {
+            $ref = AirportReference::where('identifier_type', 'iata')
+                ->where('identifier_value', strtoupper($iataCode))
+                ->first();
+
+            return $ref ? ($ref->city_name ?? null) : null;
         } catch (\Throwable $e) {
             return null;
         }
