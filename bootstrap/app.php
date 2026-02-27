@@ -1,11 +1,9 @@
 <?php
-
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\LocaleMiddleware;
 use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
-
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
@@ -16,7 +14,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->web(prepend: [LocaleMiddleware::class,]);
         $middleware->api(prepend: [EnsureFrontendRequestsAreStateful::class,]);
-        $middleware->alias(['auth:sanctum' => EnsureFrontendRequestsAreStateful::class,]);
+        $middleware->alias([
+            'auth:sanctum' => EnsureFrontendRequestsAreStateful::class,
+            'api.key' => \App\Http\Middleware\ValidateApiKey::class,
+            'api.cors' => \App\Http\Middleware\ApiCors::class,
+            'api.log' => \App\Http\Middleware\ApiLogger::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

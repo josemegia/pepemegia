@@ -96,10 +96,12 @@ return [
         'tts_voices'   => [                               // ✔️ Lista fija, sin `.env`
             ['value' => 'shimmer', 'text' => 'Voz Shimmer'],
             ['value' => 'alloy',   'text' => 'Voz Alloy'],
-            ['value' => 'echo',    'text' => 'Voz Echo'],
-            ['value' => 'fable',   'text' => 'Voz Fable'],
-            ['value' => 'onyx',    'text' => 'Voz Onyx'],
-            ['value' => 'nova',    'text' => 'Voz Nova'],
+            ['value' => 'echo',   'text' => 'Voz Echo'],
+            ['value' => 'fable',  'text' => 'Voz Fable'],
+            ['value' => 'onyx',   'text' => 'Voz Onyx'],
+            ['value' => 'nova',   'text' => 'Voz Nova'],
         ],
+        'advisor_model' => env('OPENAI_API_ADVISOR_MODEL', 'gpt-4o-mini'),
+        'api_key2'     => env('OPENAI_API_KEY2'),
     ],
 ];

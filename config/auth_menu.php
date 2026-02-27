@@ -13,6 +13,17 @@ return [
                 ['type' => 'text', 'value' => 'Mi Bóveda'],
             ],
         ],
+        /*
+        [
+            'label'   => 'Seeders 4Life',
+            'url'     => '/admin/docs/seeders',
+            'title'   => 'Guía para generar seeders por país',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-database'],
+                ['type' => 'text', 'value' => 'Seeders 4Life'],
+            ],
+        ],
+        */
         // --- Menú de Perfil de Usuario (para cualquier usuario autenticado) ---
         [
             'label'   => 'menu.profile_label',

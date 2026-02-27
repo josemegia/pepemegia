@@ -45,6 +45,22 @@
             {{-- Las rutas aquí son coherentes con web.php --}}
             @php
                 $cards = [
+                    // Tarjeta para Descargador de Reels
+                    [
+                        'title' => __('Reels Downloader'),
+                        'desc' => __('Download reels from Instagram, Stories and Facebook.'),
+                        'route' => route('reels.index'),
+                        'target' => '_self',
+                        'can' => 'manage-users',
+                    ],
+                    // Tarjeta para Presentation Timer
+                    [
+                        'title' => __('Timer'),
+                        'desc' => __('Timer with voice announcements for your presentations.'),
+                        'route' => route('presentacion'),
+                        'target' => '_blank',
+                        'can' => null,
+                    ],
                     // Tarjeta para Flyer - Visible para todos
                     [
                         'title' => __('Flyer'),

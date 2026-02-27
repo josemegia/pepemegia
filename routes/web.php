@@ -17,6 +17,8 @@ use App\Http\Controllers\{
     VentasController,
     IframeController,
     PosterController,
+    ReelDownloaderController,
+    FlAdvisorController,
 
     Auth\TwoFactorAuthenticationController,
     Auth\TwoFactorRecoveryCodesController,
@@ -24,30 +26,44 @@ use App\Http\Controllers\{
     Auth\SocialiteController,
     Auth\ProfileController,
 
+    Admin\FlAdminProductsController,
     Admin\RecaptchaBlockController,
     Admin\AdminUsersController,
     Admin\AirportController,
-    Admin\StayController
+    Admin\StayController,
+    Admin\FlDocumentsController,
+    Admin\FlApiClientsController
+
     };
 
 use App\Services\ShortUrlService;
-/*
-/////test notify
-use App\Models\User;
-use App\Notifications\WelcomeNotification;
-Route::get('/test/{user}', function (User $user) {
-    // Forzamos un idioma si quieres, o respetamos el del user
-    $user->notify(
-        (new WelcomeNotification())->locale($user->locale ?? app()->getLocale())
-    );
 
-    // Verificación de email (usa tu CustomVerifyEmail)
-    $user->sendEmailVerificationNotification();
+Route::get('/presentacion', function () { return view('presentacion'); })->name('presentacion');
 
-    return 'OK: WelcomeNotification + VerifyEmail encolados/enviados';
-})->middleware('auth');
-/////fin test
-*/
+// Seeders
+Route::middleware(['auth'])->group(function () {
+    Route::view('/admin/docs/seeders', 'admin.docs.seeders');
+});
+
+// 4Life IA Advisor
+Route::prefix('4life')->name('fourlife.')->group(function () {
+    Route::get("/", [FlAdvisorController::class, "index"])->name("chat");
+    Route::post("/consult", [FlAdvisorController::class, "consult"])->name("consult");
+    Route::post("/save-code", [FlAdvisorController::class, "saveCode"])->name("save-code");
+});
+
+// ─── Descargador de Reels ────────────────────────────
+Route::middleware(['auth'])->prefix('reels')->name('reels.')->group(function () {
+    Route::get('/', [ReelDownloaderController::class, 'index'])->name('index');
+    Route::post('/cookies', [ReelDownloaderController::class, 'uploadCookies'])->name('cookies');
+    Route::post('/procesar', [ReelDownloaderController::class, 'procesar'])->name('procesar');
+    Route::post('/descargar', [ReelDownloaderController::class, 'descargar'])->name('descargar');
+    Route::get('/descargar-archivo/{archivo}', [ReelDownloaderController::class, 'descargarArchivo'])->name('descargar.archivo');
+    Route::get('/archivo/{archivo}', [ReelDownloaderController::class, 'verArchivo'])->name('ver');
+    Route::delete('/archivos/masivo', [ReelDownloaderController::class, 'eliminarMasivo'])->name('eliminar.masivo');
+    Route::delete('/archivo/{archivo}', [ReelDownloaderController::class, 'eliminarArchivo'])->name('eliminar');
+});
+
 // Página principal y privacidad
 Route::view('/', 'inicio')->name('inicio');
 Route::view('/privacidad', 'privacidad')->name('privacidad');
@@ -80,6 +96,26 @@ Route::middleware('auth')->group(function () {
 
     // Admin
     Route::middleware('admin')->prefix('admin')->name('admin.')->group(function () {
+        Route::prefix('fl-products')->name('fl-products.')->group(function () {
+            Route::get('/', [FlAdminProductsController::class, 'index'])->name('index');
+            Route::post('/import', [FlAdminProductsController::class, 'import'])->name('import');
+            Route::delete('/{country}', [FlAdminProductsController::class, 'destroy'])->name('destroy');
+        });
+        Route::prefix("documents")->name("documents.")->group(function () {
+            Route::get("/", [FlDocumentsController::class, "index"])->name("index");
+            Route::post("/", [FlDocumentsController::class, "store"])->name("store");
+            Route::get("/{document}/download", [FlDocumentsController::class, "download"])->name("download");
+            Route::patch("/{document}/toggle", [FlDocumentsController::class, "toggleActive"])->name("toggle");
+            Route::delete("/{document}", [FlDocumentsController::class, "destroy"])->name("destroy");
+        });
+        Route::prefix("api-clients")->name("api-clients.")->group(function () {
+            Route::get("/", [FlApiClientsController::class, "index"])->name("index");
+            Route::post("/", [FlApiClientsController::class, "store"])->name("store");
+            Route::patch("/{client}/toggle", [FlApiClientsController::class, "toggleActive"])->name("toggle");
+            Route::post("/{client}/reset", [FlApiClientsController::class, "resetCounters"])->name("reset");
+            Route::get("/{client}/logs", [FlApiClientsController::class, "logs"])->name("logs");
+            Route::delete("/{client}", [FlApiClientsController::class, "destroy"])->name("destroy");
+        });
         Route::get('iframe', [IframeController::class, 'show'])->name('iframe');
         Route::resource('users', AdminUsersController::class);
         Route::view('/dashboard', 'admin.dashboard')->name('dashboard');

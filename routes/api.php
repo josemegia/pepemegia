@@ -6,6 +6,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Http;
+
+use App\Http\Controllers\Api\V1\ConsultationController;
+use App\Http\Controllers\Api\V1\CatalogController;
+
 use App\Http\Controllers\Admin\StayController;
 use App\Http\Controllers\Admin\AirportController;
 use App\Models\Reserva;
@@ -71,4 +75,31 @@ Route::prefix('admin')->name('api.admin.')->middleware('auth:sanctum')->group(fu
         Route::get('/{id}', [AirportController::class, 'show'])->name('show');  
     });
 
+});
+
+// ─── 4Life API v1 ────────────────────────────────────
+Route::prefix('v1')->middleware(['api.cors', 'api.key', 'api.log'])->group(function () {
+
+    // Consultas y chat
+    Route::post('/consultation', [ConsultationController::class, 'create']);
+    Route::post('/chat', [ConsultationController::class, 'chat']);
+
+    // Catálogo (lectura)
+    Route::get('/products', [CatalogController::class, 'products']);
+    Route::get('/conditions', [CatalogController::class, 'conditions']);
+    Route::get('/countries', [CatalogController::class, 'countries']);
+
+    // Status y uso
+    Route::get('/status', function (Request $request) {
+        $client = $request->api_client;
+        return response()->json([
+            'success' => true,
+            'client' => $client->name,
+            'plan' => $client->plan,
+            'usage' => [
+                'today' => $client->requests_today . '/' . $client->daily_limit,
+                'month' => $client->requests_this_month . '/' . $client->monthly_limit,
+            ]
+        ]);
+    });
 });

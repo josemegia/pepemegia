@@ -29,3 +29,6 @@ npm-debug.log
 Thumbs.db
 yarn-error.log
 node_modules
+cookies.txt
+python/cookies.txt
+test_scrape.cjs

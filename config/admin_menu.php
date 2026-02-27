@@ -3,6 +3,37 @@
 
 return [
     'items' => [
+        
+        [
+            'label'   => 'API Clients',
+            'route'   => 'admin.api-clients.index',
+            'can'     => 'manage-users',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-key'],
+                ['type' => 'text', 'value' => 'API Clients'],
+            ],
+            'title' => 'Gestión de API Clients',
+        ],
+        [
+            'label'   => 'Documentos',
+            'route'   => 'admin.documents.index',
+            'can'     => 'manage-users',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-file-alt'],
+                ['type' => 'text', 'value' => 'Documentos'],
+            ],
+            'title' => 'Gestión de documentos descargables',
+        ],
+        [
+            'label'   => '4Life Productos',
+            'route'   => 'admin.fl-products.index',
+            'can'     => 'manage-users',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-dna'],
+                ['type' => 'text', 'value' => '4Life Productos'],
+            ],
+            'title' => 'Importar productos 4Life por país',
+        ],
         [
             'label'   => 'Vault Admin',
             'url'     => '/admin/iframe?url=https://vault.pepemegia.com/admin',
@@ -124,6 +155,16 @@ return [
                     'title' => 'menu.integrations_title',
                 ],
             ],
+        ],
+        [
+            'label'   => 'Descargador de Reels',
+            'route'   => 'reels.index',
+            'can'     => 'manage-users',
+            'content' => [
+                ['type' => 'icon', 'value' => 'fas fa-video'],
+                ['type' => 'text', 'value' => 'Reels Downloader'],
+            ],
+            'title' => 'Descargar Reels de Instagram y Facebook',
         ],
         [
             'label'   => 'menu.tools',

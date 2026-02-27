@@ -6,10 +6,20 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
 
     <title>@yield('title', config('app.name'))</title>
-    <link rel="apple-touch-icon" sizes="180x180" href="{{ basename(config('app.url'))}}/apple-touch-icon.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/{{ basename(config('app.url'))}}/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/{{ basename(config('app.url'))}}/favicon-16x16.png">
-    <link rel="manifest" href="/{{ basename(config('app.url'))}}/site.webmanifest">
+    @if(request()->server('FROM_CHAT'))
+    <link rel="icon" type="image/svg+xml" href="/favicon-4life.svg">
+    <link rel="apple-touch-icon" href="/favicon-4life.svg">
+    <link rel="manifest" href="/manifest-4life.json">
+    <meta name="theme-color" content="#1e40af">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AI 4Life">
+    @else
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    @endif
     {{-- Google Fonts --}}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,6 +35,7 @@
 <body class="antialiased bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100 min-h-screen flex flex-col">
 
     {{-- HEADER: Control Alpine.js aquí para limitar el scope y mejorar el rendimiento --}}
+    @if(!request()->server('FROM_CHAT'))
     <header
         x-data="{
             openMobileMenu: false,
@@ -110,6 +121,7 @@
             </div>
         </div>
     </header>
+    @endif
 
     <main class="flex-grow">
         @yield('content')
